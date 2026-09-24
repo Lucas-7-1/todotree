@@ -23,6 +23,12 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
     if (inputRef.current) {
       inputRef.current.focus();
     }
+    const rafId = requestAnimationFrame(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    });
+    return () => cancelAnimationFrame(rafId);
   }, [parentId]);
 
   const handleCommit = (continuous: boolean) => {
@@ -108,6 +114,7 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
         <input
           ref={inputRef}
           type="text"
+          autoFocus
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={handleKeyDown}

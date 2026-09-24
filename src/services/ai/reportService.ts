@@ -19,7 +19,11 @@ import {
   generateVerificationCode,
   buildTestPayload,
 } from './prompts';
-import { validateAIReportResponse, generateLocalEmptyReport } from './validator';
+import {
+  validateAIReportResponse,
+  generateLocalEmptyReport,
+  generateLocalBaseSummary,
+} from './validator';
 import { callOpenAICompatible, inspectOutboundPayload } from './apiAdapter';
 import { computeContentHash, formatHashBadge } from './hashUtils';
 
@@ -718,57 +722,41 @@ export async function requestReport(
     });
     await saveAIAttempts(attempts);
 
-    // Attempt 2 (Limited automatic retry/repair, max 2 attempts per job, PRD 9.1 & 10.2 & A33)
-    if (!validatedData && res.statusCode !== 422) {
-      options.onProgress?.('初次生成未通过校验，正在进行有限自动重试 (第 2/2 次)...');
-      const attemptId2 = 'att_' + Date.now();
-      const retryRes = await callOpenAICompatible(facts, settings, {
-        systemPrompt,
-        snapshot,
-        attemptId: attemptId2,
-      });
+    let isDowngraded = false;
+    let downgradeReason: string | undefined = undefined;
+    let sourceKind: 'ai' | 'local_summary' | 'local_empty' = 'ai';
 
-      if (!retryRes.error) {
-        const valRes2 = validateAIReportResponse(retryRes.rawText, facts);
-        if (valRes2.isValid && valRes2.data) {
-          validatedData = valRes2.data;
-          tokensUsed = retryRes.tokensUsed;
-          responseModel = retryRes.responseModel;
-          durationMs = (durationMs || 0) + (retryRes.durationMs || 0);
-          inspectionResult = retryRes.inspection;
-        }
-      }
-
-      attempts.push({
-        attempt_id: attemptId2,
-        job_id: 'job_' + Date.now(),
-        report_key: reportKey,
-        timestamp: new Date().toISOString(),
-        is_success: !!validatedData,
-        is_counted: true,
-        source: source,
-        tokens_used: tokensUsed,
-        error_type: validatedData ? undefined : lastError,
-      });
-      await saveAIAttempts(attempts);
-    }
-
+    // If model output is invalid, rejected, or network failed, fallback gracefully (PRD v1.1 Section 3.3)
     if (!validatedData) {
-      throw new Error(`生成复盘报告失败: ${lastError || '输出无法通过格式或证据校验'}`);
+      if (facts.completed_records.length > 0) {
+        options.onProgress?.('AI 未生成有效结果，正在按真实完成记录生成本地基础摘要...');
+        validatedData = generateLocalBaseSummary(facts);
+        isDowngraded = true;
+        downgradeReason = lastError || 'AI 暂未生成成功，已提供基础摘要';
+        sourceKind = 'local_summary';
+        responseModel = '本地基础摘要 (确定性整理)';
+      } else {
+        validatedData = generateLocalEmptyReport(facts);
+        sourceKind = 'local_empty';
+        responseModel = '本地空报告';
+      }
     }
 
     // Run compliance check (PRD v1.3 Section 8.1 & 8.3)
     const compliance = checkReportCompliance(validatedData.report_markdown, facts);
 
-    // Success! Save report version with full 4-layer evidence
+    // Save report version with full metadata
     const newVersionNumber = existingReport ? existingReport.latest_version + 1 : 1;
     const reportVersion: ReportVersion = {
       version: newVersionNumber,
       created_at: new Date().toISOString(),
-      model: responseModel || (settings.use_mock ? 'Mock Adapter (确定性模拟)' : settings.model_id),
+      model: isDowngraded ? '本地基础摘要 (确定性整理)' : responseModel || (settings.use_mock ? 'Mock Adapter (确定性模拟)' : settings.model_id),
       prompt_version: SYSTEM_PROMPT_VERSION,
       response: validatedData,
-      is_mock: settings.use_mock,
+      is_mock: isDowngraded ? false : settings.use_mock,
+      is_downgraded: isDowngraded,
+      downgrade_reason: downgradeReason,
+      source_kind: sourceKind,
       applied_template_content: template.content,
       applied_template_version: template.version,
       applied_template_hash: templateHash,

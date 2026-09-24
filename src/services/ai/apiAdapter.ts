@@ -170,14 +170,46 @@ export async function callOpenAICompatible(
       };
     }
 
-    // Default mock response for report generation
+    // PRD Section 4 & 5 Mock Generator: Dynamically construct realistic summary from facts.completed_records
+    const groups = new Map<string, typeof facts.completed_records>();
+    for (const rec of facts.completed_records) {
+      let groupName = '主要完成事项';
+      if (rec.path_titles_at_completion && rec.path_titles_at_completion.length > 0) {
+        groupName = rec.path_titles_at_completion[rec.path_titles_at_completion.length - 1];
+      }
+      if (!groups.has(groupName)) {
+        groups.set(groupName, []);
+      }
+      groups.get(groupName)!.push(rec);
+    }
+
+    const sections: string[] = ['## 本期完成事项\n'];
+    const mockEvidence: any[] = [];
+    for (const [groupName, recs] of groups.entries()) {
+      if (groups.size > 1 || groupName !== '主要完成事项') {
+        sections.push(`### ${groupName}`);
+      }
+      for (const rec of recs) {
+        const cleanTitle = rec.title.trim() || '未命名任务';
+        let claimText = '';
+        if (rec.outcome_note && rec.outcome_note.trim()) {
+          claimText = `完成“${cleanTitle}”：${rec.outcome_note.trim()}`;
+        } else {
+          claimText = `完成“${cleanTitle}”`;
+        }
+        sections.push(`- ${claimText}。`);
+        mockEvidence.push({
+          claim_text: claimText,
+          task_instance_ids: [rec.instance_id],
+          claim_kind: 'fact',
+        });
+      }
+      sections.push('');
+    }
+
     const mockOutput = JSON.stringify({
-      report_markdown: `一、本期工作概述\n顺利推进各项既定任务，重点完成了自检与报告功能验证。\n\n二、分项目工作进展\n项目管理系统：\n- 已完成两项核心自检测试，形成第一版验证清单。\n\n三、日常事务\n已跟进相关日常协同及需求讨论。\n\n四、待补充信息\n暂无重大未决事项。`,
-      evidence_map: facts.completed_records.map(rec => ({
-        claim_text: rec.title,
-        task_instance_ids: [rec.instance_id],
-        claim_kind: 'fact',
-      })),
+      report_markdown: sections.join('\n').trim(),
+      evidence_map: mockEvidence,
       clarification_notes: [],
     });
 

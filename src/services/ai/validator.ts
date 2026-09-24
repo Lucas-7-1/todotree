@@ -32,6 +32,90 @@ export function generateLocalEmptyReport(facts: FactsPackage): AIReportResponse 
 }
 
 /**
+ * Detect if text is an unhelpful rejection notice (PRD v1.1 Section 3.3)
+ */
+export function isRejectionOrInsufficientNotice(text: string): boolean {
+  if (!text || text.trim().length === 0) return true;
+  const lower = text.trim();
+  if (lower.includes('信息不足，暂无法整理为具体工作成果')) return true;
+  if (
+    lower.includes('信息不足') &&
+    (lower.includes('暂无法') || lower.includes('无法整理') || lower.includes('缺少具体工作内容'))
+  ) {
+    return true;
+  }
+  if (lower.includes('暂无成果可写')) return true;
+  return false;
+}
+
+/**
+ * Local base summary generator (PRD v1.1 Section 2, 3.3, 4, 5)
+ * Deterministically organizes confirmed completed records by project/parent into a clean Markdown summary
+ */
+export function generateLocalBaseSummary(facts: FactsPackage): AIReportResponse {
+  if (!facts.completed_records || facts.completed_records.length === 0) {
+    return generateLocalEmptyReport(facts);
+  }
+
+  // 1. Group records by project or parent context
+  const groups = new Map<string, typeof facts.completed_records>();
+  for (const rec of facts.completed_records) {
+    let groupName = '主要完成事项';
+    if (rec.path_titles_at_completion && rec.path_titles_at_completion.length > 0) {
+      groupName = rec.path_titles_at_completion[rec.path_titles_at_completion.length - 1];
+    }
+    if (!groups.has(groupName)) {
+      groups.set(groupName, []);
+    }
+    groups.get(groupName)!.push(rec);
+  }
+
+  const markdownSections: string[] = ['## 本期完成事项\n'];
+  const evidenceMap: EvidenceItem[] = [];
+  const clarificationNotes: ClarificationNote[] = [];
+
+  for (const [groupName, recs] of groups.entries()) {
+    if (groups.size > 1 || groupName !== '主要完成事项') {
+      markdownSections.push(`### ${groupName}`);
+    }
+
+    // Format items under this group
+    for (const rec of recs) {
+      const cleanTitle = rec.title.trim() || '未命名任务';
+      let claimText = '';
+      if (rec.outcome_note && rec.outcome_note.trim()) {
+        claimText = `完成“${cleanTitle}”：${rec.outcome_note.trim()}`;
+      } else {
+        claimText = `完成“${cleanTitle}”`;
+      }
+
+      markdownSections.push(`- ${claimText}。`);
+      evidenceMap.push({
+        claim_text: claimText,
+        task_instance_ids: [rec.instance_id],
+        claim_kind: 'fact',
+      });
+
+      // If title is super short or looks like a placeholder, add non-blocking friendly suggestion (max 3)
+      if (clarificationNotes.length < 3 && (/^\d+$/.test(cleanTitle) || cleanTitle.includes('测试任务'))) {
+        clarificationNotes.push({
+          task_instance_ids: [rec.instance_id],
+          issue: `任务「${cleanTitle}」信息较简单`,
+          suggested_input: '补充任务具体产出或说明，可让下次复盘总结更丰富具体',
+        });
+      }
+    }
+    markdownSections.push('');
+  }
+
+  return {
+    report_markdown: markdownSections.join('\n').trim(),
+    evidence_map: evidenceMap,
+    clarification_notes: clarificationNotes,
+  };
+}
+
+/**
  * Clean and parse raw JSON text returned by the model
  */
 export function extractAndParseJSON(rawText: string): { success: boolean; data?: any; error?: string } {
@@ -82,6 +166,16 @@ export function validateAIReportResponse(
     return {
       isValid: false,
       errorMessage: '模型输出缺少非空的 report_markdown 正文字段',
+      canRepairLocally: true,
+    };
+  }
+
+  // 1.1 Check if model produced an unhelpful rejection notice (PRD 3.3)
+  if (facts.completed_records.length > 0 && isRejectionOrInsufficientNotice(obj.report_markdown)) {
+    return {
+      isValid: false,
+      errorMessage: '模型输出为信息不足拒绝句，触发本地基础摘要降级 (PRD 3.3)',
+      canRepairLocally: true,
     };
   }
 

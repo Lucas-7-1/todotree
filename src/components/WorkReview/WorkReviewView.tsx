@@ -163,6 +163,7 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
   const [bodyViewMode, setBodyViewMode] = useState<'markdown' | 'plaintext'>('markdown');
   const [previewCopiedSection, setPreviewCopiedSection] = useState<string | null>(null);
   const [taskEvents, setTaskEvents] = useState<TaskEvent[]>([]);
+  const [showClarifications, setShowClarifications] = useState(false);
 
   // Load initial settings, reports, and events
   useEffect(() => {
@@ -333,13 +334,12 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
   const handleGenerate = async (forceRegenerate: boolean = false) => {
     if (isGenerating) return;
 
-    if (factsPackage.completed_records.length === 0) {
-      setErrorMessage('该周期内暂无已完成的任务事实记录，无法生成复盘报告');
-      return;
-    }
-
     setIsGenerating(true);
-    setGenerationProgress('正在装载快照并验证出站载荷...');
+    setGenerationProgress(
+      factsPackage.completed_records.length === 0
+        ? '本地无已完成记录，直接生成空报告...'
+        : '正在装载快照并验证出站载荷...'
+    );
     setErrorMessage(null);
 
     try {
@@ -751,6 +751,28 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
             </div>
           )}
 
+          {/* Downgrade Banner if downgraded (PRD v1.1 Section 3.4) */}
+          {activeReport && latestVersion && latestVersion.is_downgraded && (
+            <div className="p-3 bg-blue-50/90 border border-blue-200 rounded-2xl flex items-center justify-between text-xs text-blue-900 gap-3 shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <Info className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                <div>
+                  <span className="font-bold">基础摘要</span>
+                  <span className="text-blue-700 ml-1.5">
+                    {latestVersion.downgrade_reason || 'AI 暂未生成成功，已按真实完成记录整理基础摘要。您可以随时重新尝试。'}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => handleGenerate(true)}
+                className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-xs flex-shrink-0 flex items-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>用 AI 重新整理</span>
+              </button>
+            </div>
+          )}
+
           {/* Report Viewer Container */}
           {activeReport && latestVersion ? (
             <article className="bg-white border border-slate-200/90 rounded-2xl p-7 md:p-9 shadow-sm space-y-6">
@@ -762,14 +784,29 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
                       {activeReport.title}
                     </h2>
                     <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                        latestVersion.is_mock
+                      className={`text-xs px-2.5 py-0.5 rounded-full font-semibold ${
+                        latestVersion.is_downgraded
+                          ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                          : latestVersion.is_mock
                           ? 'bg-amber-50 text-amber-700 border border-amber-200'
                           : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                       }`}
                     >
-                      v{latestVersion.version} · {latestVersion.is_mock ? '确定性模拟' : latestVersion.model}
+                      {latestVersion.is_downgraded
+                        ? '基础摘要 · 按已完成记录整理'
+                        : `v${latestVersion.version} · ${latestVersion.is_mock ? '确定性模拟' : latestVersion.model}`}
                     </span>
+
+                    {latestVersion.is_downgraded && (
+                      <button
+                        onClick={() => handleGenerate(true)}
+                        className="px-2.5 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold flex items-center gap-1 transition-colors border border-indigo-200"
+                        title="再次尝试调用大模型整理复盘报告"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>用 AI 重新整理</span>
+                      </button>
+                    )}
 
                     {/* Low-frequency details moved to Inspection & Diagnostic Modal (PRD Section 3.2) */}
                     <button
@@ -919,6 +956,50 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+
+              {/* Optional Clarification Suggestions Section (PRD v1.1 Section 2.3) */}
+              {latestVersion.response.clarification_notes &&
+                latestVersion.response.clarification_notes.length > 0 && (
+                  <div className="pt-5 border-t border-slate-100 space-y-2">
+                    <button
+                      onClick={() => setShowClarifications((prev) => !prev)}
+                      className="flex items-center justify-between w-full text-left text-xs font-bold text-slate-600 hover:text-slate-800 transition-colors py-1"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-amber-500">💡</span>
+                        <span>补充信息可让总结更具体 ({Math.min(3, latestVersion.response.clarification_notes.length)})</span>
+                        <span className="text-[11px] font-normal text-slate-400">（非必填，仅作建议）</span>
+                      </span>
+                      {showClarifications ? (
+                        <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                      )}
+                    </button>
+
+                    {showClarifications && (
+                      <div className="space-y-1.5 pt-1">
+                        {latestVersion.response.clarification_notes
+                          .slice(0, 3)
+                          .map((note, nIdx) => (
+                            <div
+                              key={nIdx}
+                              className="p-2.5 bg-amber-50/60 border border-amber-200/70 rounded-xl text-xs flex items-center justify-between gap-2"
+                            >
+                              <div className="space-y-0.5">
+                                <div className="font-semibold text-amber-900">{note.issue}</div>
+                                {note.suggested_input && (
+                                  <div className="text-[11px] text-amber-700">
+                                    建议：{note.suggested_input}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
                   </div>
                 )}
             </article>

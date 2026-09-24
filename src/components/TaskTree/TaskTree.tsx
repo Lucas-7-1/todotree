@@ -237,6 +237,11 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
     // Auto-expand parent node
     setExpandedMap((prev) => ({ ...prev, [parentId]: true }));
 
+    // If draft already exists for this parent, keep it and avoid duplicating (PRD 6.3)
+    if (inlineDraft?.parentId === parentId) {
+      return;
+    }
+
     // Set inline draft
     setInlineDraft({
       parentId,
@@ -331,6 +336,8 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
       const isSelected = selectedTaskId === task.id;
       const isContextOnly = filterActive && !filterResult.matchedIds.has(task.id);
       const snippet = filterResult.taskSnippets.get(task.id);
+      const hasDraftChild = inlineDraft?.parentId === task.id;
+      const hasDisplayChildren = hasChildren || hasDraftChild;
 
       return (
         <React.Fragment key={task.id}>
@@ -338,7 +345,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
             task={task}
             allTasks={tasks}
             level={level}
-            hasChildren={hasChildren}
+            hasChildren={hasDisplayChildren}
             isExpanded={isExpanded}
             onToggleExpand={toggleExpand}
             isSelected={isSelected}
@@ -362,7 +369,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
             matchSnippet={snippet}
             isContextOnly={isContextOnly}
           />
-          {hasChildren && isExpanded && renderTreeNodes(task.id, level + 1)}
+          {hasDisplayChildren && isExpanded && renderTreeNodes(task.id, level + 1)}
         </React.Fragment>
       );
     });
@@ -438,8 +445,8 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
                     task={task}
                     allTasks={tasks}
                     level={1}
-                    hasChildren={false}
-                    isExpanded={false}
+                    hasChildren={inlineDraft?.parentId === task.id}
+                    isExpanded={inlineDraft?.parentId === task.id}
                     onToggleExpand={() => {}}
                     isSelected={selectedTaskId === task.id}
                     onSelect={onSelectTask}
@@ -459,6 +466,15 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
                     reducedMotion={reducedMotion}
                     matchSnippet={snippet}
                   />
+                  {inlineDraft && inlineDraft.parentId === task.id && (
+                    <InlineTaskDraftRow
+                      key={inlineDraft.tempId}
+                      parentId={task.id}
+                      level={2}
+                      onSubmit={handleInlineSubmit}
+                      onCancel={handleInlineCancel}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -517,8 +533,8 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
                       task={task}
                       allTasks={tasks}
                       level={1}
-                      hasChildren={false}
-                      isExpanded={false}
+                      hasChildren={inlineDraft?.parentId === task.id}
+                      isExpanded={inlineDraft?.parentId === task.id}
                       onToggleExpand={() => {}}
                       isSelected={selectedTaskId === task.id}
                       onSelect={onSelectTask}
@@ -538,6 +554,15 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
                       reducedMotion={reducedMotion}
                       matchSnippet={snippet}
                     />
+                    {inlineDraft && inlineDraft.parentId === task.id && (
+                      <InlineTaskDraftRow
+                        key={inlineDraft.tempId}
+                        parentId={task.id}
+                        level={2}
+                        onSubmit={handleInlineSubmit}
+                        onCancel={handleInlineCancel}
+                      />
+                    )}
                   </div>
                 );
               })}

@@ -207,6 +207,9 @@ export interface ReportVersion {
   outbound_inspection?: OutboundInspectionResult;
   duration_ms?: number;
   compliance_check?: ReportComplianceCheck;
+  is_downgraded?: boolean;
+  downgrade_reason?: string;
+  source_kind?: 'ai' | 'local_summary' | 'local_empty';
 }
 
 export interface SavedReport {
