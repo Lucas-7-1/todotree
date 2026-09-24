@@ -9,7 +9,8 @@ import {
   calculateProgress,
   getAncestorPath,
   getDescendantTasks,
-  getAncestorNodes
+  getAncestorNodes,
+  hasActiveTaskAncestor
 } from '../../services/treeOperations';
 import { createDragGhost, cleanupDragGhost } from '../../services/dragGhost';
 import { formatRecurrenceSummary } from '../../services/recurrence';
@@ -119,9 +120,9 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
 
   // Check if completing this task will auto-close ancestors
   const willCloseAncestors: string[] = [];
-  if (task.parent_id && incompleteDescendantsCount === 0) {
+  if (task.parent_id) {
     let currParentId: string | null = task.parent_id;
-    const simulatedDone = new Set<string>([task.id]);
+    const simulatedDone = new Set<string>([task.id, ...incompleteDescendants.map((d) => d.id)]);
     while (currParentId) {
       const parentNode = allTasks.find((t) => t.id === currParentId);
       if (!parentNode || parentNode.status === 'done' || parentNode.deleted_at) break;
@@ -267,7 +268,13 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
 
   const handleConfirmComplete = () => {
     if (animPhase !== 'idle') return;
-    if (showCompleted || reducedMotion) {
+    const willStayInWorkspace =
+      showCompleted ||
+      (task.parent_id !== null &&
+        hasActiveTaskAncestor(allTasks, task) &&
+        willCloseAncestors.length === 0);
+
+    if (willStayInWorkspace || reducedMotion) {
       if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
       else setLocalPendingConfirm(false);
       onToggleComplete(task);

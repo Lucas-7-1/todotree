@@ -264,3 +264,47 @@ export function formatRelativeDate(task: TaskNode): { label: string; isOverdue: 
 
   return { label: '-', isOverdue: false, isToday: false };
 }
+
+/**
+ * Check if a completed task has an active (open) task ancestor.
+ * If the first open ancestor is a category container (root_bucket === 'categories')
+ * or there is no open ancestor, returns false (the task belongs to an archived/completed branch).
+ * If the first open ancestor is an actual task, returns true (the branch is still active).
+ */
+export function hasActiveTaskAncestor(tasks: TaskNode[], task: TaskNode): boolean {
+  let currParentId = task.parent_id;
+  while (currParentId) {
+    const parentNode = tasks.find((t) => t.id === currParentId);
+    if (!parentNode || parentNode.deleted_at) break;
+    if (parentNode.status === 'open') {
+      if (parentNode.root_bucket === 'categories') {
+        return false;
+      }
+      return true;
+    }
+    currParentId = parentNode.parent_id;
+  }
+  return false;
+}
+
+/**
+ * Backward-compatible alias for hasActiveTaskAncestor.
+ */
+export const hasOpenAncestor = hasActiveTaskAncestor;
+
+/**
+ * Determine if a task should be visible in the active workspace.
+ * Open tasks are always visible.
+ * Completed tasks remain visible if they belong to an active, incomplete task branch (i.e. hasActiveTaskAncestor).
+ */
+export function isTaskVisibleInWorkspace(
+  tasks: TaskNode[],
+  task: TaskNode,
+  showCompleted: boolean = false
+): boolean {
+  if (task.deleted_at) return false;
+  if (showCompleted) return true;
+  if (task.status === 'open') return true;
+  return hasActiveTaskAncestor(tasks, task);
+}
+

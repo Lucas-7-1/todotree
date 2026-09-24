@@ -13,7 +13,8 @@ import {
   getChildrenTasks,
   getAncestorPath,
   getAncestorNodes,
-  getNodeDepth
+  getNodeDepth,
+  isTaskVisibleInWorkspace
 } from '../../services/treeOperations';
 import {
   TaskFilterState,
@@ -150,6 +151,10 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
   // Run filter engine
   const todayStr = useMemo(() => getLocalDateString(), []);
   const openTasks = useMemo(() => tasks.filter((t) => !t.deleted_at && t.status === 'open'), [tasks]);
+  const visibleWorkspaceTasks = useMemo(
+    () => tasks.filter((t) => isTaskVisibleInWorkspace(tasks, t, showCompleted)),
+    [tasks, showCompleted]
+  );
 
   const filterResult = useMemo(() => {
     return applyTaskFilters(tasks, filterState, todayStr);
@@ -308,9 +313,8 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
   const renderTreeNodes = (parentId: string | null, level = 1): React.ReactNode => {
     let children = getChildrenTasks(tasks, parentId);
 
-    // Active main workspace strictly only renders open tasks (PRD Section 8)
-    // Completed tasks and branches completely exit into the Completed Drawer!
-    children = children.filter((c) => c.status === 'open' && !c.deleted_at);
+    // Active workspace renders open tasks and completed subtasks under active parents
+    children = children.filter((c) => isTaskVisibleInWorkspace(tasks, c, showCompleted));
 
     // Filter matching if filter active: keep nodes that are matched OR ancestors of matched items
     if (filterActive) {
@@ -328,8 +332,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
       const taskChildren = getChildrenTasks(tasks, task.id);
       const hasChildren = taskChildren.some(
         (c) =>
-          !c.deleted_at &&
-          c.status === 'open' &&
+          isTaskVisibleInWorkspace(tasks, c, showCompleted) &&
           (!filterActive || filterResult.matchedIds.has(c.id) || filterResult.contextAncestorIds.has(c.id))
       );
       const isExpanded = !!expandedMap[task.id];
@@ -395,8 +398,8 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
 
   // 2. List View Renderer (Flat with Breadcrumbs & Grouping)
   const renderListView = (): React.ReactNode => {
-    const sourceTasks = (filterActive ? filterResult.matchedTasks : openTasks).filter(
-      (t) => !t.deleted_at && t.status === 'open'
+    const sourceTasks = (filterActive ? filterResult.matchedTasks : visibleWorkspaceTasks).filter(
+      (t) => isTaskVisibleInWorkspace(tasks, t, showCompleted)
     );
 
     if (sourceTasks.length === 0) {
@@ -485,8 +488,8 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
 
   // 3. Project Group View Renderer
   const renderProjectGroupView = (): React.ReactNode => {
-    const sourceTasks = (filterActive ? filterResult.matchedTasks : openTasks).filter(
-      (t) => !t.deleted_at && t.status === 'open'
+    const sourceTasks = (filterActive ? filterResult.matchedTasks : visibleWorkspaceTasks).filter(
+      (t) => isTaskVisibleInWorkspace(tasks, t, showCompleted)
     );
 
     if (sourceTasks.length === 0) {
