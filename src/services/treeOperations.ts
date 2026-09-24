@@ -291,8 +291,10 @@ export const hasOpenAncestor = hasActiveTaskAncestor;
 
 /**
  * Determine if a task should be visible in the active workspace.
- * Open tasks are always visible.
- * Completed tasks remain visible if they belong to an active, incomplete task branch (i.e. hasActiveTaskAncestor).
+ * PRD V1.0 rules:
+ * - Active workspace shows all non-deleted, non-archived tasks.
+ * - Completed tasks remain struck through in the workspace until archived.
+ * - Nodes with archived or deleted ancestors are excluded from the active workspace.
  */
 export function isTaskVisibleInWorkspace(
   tasks: TaskNode[],
@@ -301,7 +303,17 @@ export function isTaskVisibleInWorkspace(
 ): boolean {
   if (task.deleted_at) return false;
   if (task.archived_at) return false;
-  if (showCompleted) return true;
-  if (task.status === 'open') return true;
-  return hasActiveTaskAncestor(tasks, task);
+
+  let currParentId = task.parent_id;
+  const visited = new Set<string>([task.id]);
+  while (currParentId && !visited.has(currParentId)) {
+    visited.add(currParentId);
+    const parentNode = tasks.find((t) => t.id === currParentId);
+    if (!parentNode || parentNode.deleted_at || parentNode.archived_at) {
+      return false;
+    }
+    currParentId = parentNode.parent_id;
+  }
+  return true;
 }
+

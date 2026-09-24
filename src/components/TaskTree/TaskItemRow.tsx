@@ -14,6 +14,7 @@ import {
 } from '../../services/treeOperations';
 import { createDragGhost, cleanupDragGhost } from '../../services/dragGhost';
 import { formatRecurrenceSummary } from '../../services/recurrence';
+import { willCompletionArchiveTree } from '../../services/taskLifecycle';
 import {
   ChevronRight,
   ChevronDown,
@@ -272,10 +273,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
     if (animPhase !== 'idle') return;
     const willStayInWorkspace =
       showCompleted ||
-      (task.parent_id !== null &&
-        hasActiveTaskAncestor(allTasks, task) &&
-        willCloseAncestors.length === 0 &&
-        !allTasks.some(t => t.parent_id === task.id && !t.deleted_at));
+      !willCompletionArchiveTree(allTasks, task.id);
 
     if (willStayInWorkspace || reducedMotion) {
       if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);

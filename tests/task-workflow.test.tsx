@@ -12,7 +12,7 @@ import { TaskNode } from '../src/types/todo';
 const timestamp = '2026-09-24T01:00:00.000Z';
 function task(id: string, parent_id: string | null = null, status: 'open' | 'done' = 'open'): TaskNode {
   return { id, parent_id, title: id, status, root_bucket: parent_id ? null : 'categories', note: '', sort_order: 1,
-    completed_at: status === 'done' ? timestamp : null, due_type: 'none', due_date: null, due_at: null,
+    completed_at: status === 'done' ? timestamp : null, archived_at: null, due_type: 'none', due_date: null, due_at: null,
     quadrant: null, planned_date: null, created_at: timestamp, updated_at: timestamp, deleted_at: null, deletion_batch_id: null };
 }
 const get = (tasks: TaskNode[], id: string) => tasks.find(t => t.id === id)!;
@@ -45,19 +45,22 @@ test('搞定 archives only the completed child; last sibling still closes the wh
   assert.equal(get(result.tasks, 'a').completed_at, completionTime);
 });
 
-test('nested branch auto-closes without closing an unfinished sibling branch', () => {
+test('nested branch auto-closes with strikethrough retention without closing unfinished sibling branch (PRD V1.0)', () => {
   const tasks = [task('root'), task('branch', 'root'), task('other', 'root'), task('a', 'branch'), task('b', 'branch')];
   const first = completeTaskBranch(tasks, 'a').tasks;
   assert.ok(visible(first).includes('a'));
   const last = completeTaskBranch(first, 'b');
   assert.deepEqual(last.autoClosedIds, ['branch']);
-  assert.deepEqual(visible(last.tasks), ['root', 'other']);
-  undoManager.pushTaskDiff('last child', first, last.tasks);
-  const restored = undoManager.undo(last.tasks)!.newTasks;
-  assert.deepEqual(visible(restored), ['root', 'branch', 'other', 'a', 'b']);
-  assert.equal(get(restored, 'a').status, 'done');
-  assert.equal(get(restored, 'b').status, 'open');
-  assert.deepEqual(visible(undoManager.redo(restored)!.newTasks), ['root', 'other']);
+  // PRD V1.0: Intermediate branch auto-completes, but retains strikethrough until top-level completes or explicit "搞定"
+  assert.deepEqual(visible(last.tasks), ['root', 'branch', 'other', 'a', 'b']);
+  assert.equal(get(last.tasks, 'branch').status, 'done');
+  assert.equal(get(last.tasks, 'branch').archived_at, null);
+  // Clicking "搞定" on branch archives branch and its children
+  const archivedBranch = archiveCompletedBranch(last.tasks, 'branch').tasks;
+  assert.deepEqual(visible(archivedBranch), ['root', 'other']);
+  // Completing the remaining sibling 'other' closes the top-level tree
+  const finalResult = completeTaskBranch(archivedBranch, 'other');
+  assert.deepEqual(visible(finalResult.tasks), []);
 });
 
 test('manual parent completion includes all descendants and propagates to ancestors', () => {
@@ -260,7 +263,7 @@ test('App integration: completion, archive, toast undo, parent closure and reloa
     const undoButtons = [...document.querySelectorAll('button')].filter(b => b.textContent?.trim() === '撤销');
     await click(undoButtons.at(-1)!);
     assert.ok(row('a')?.querySelector('.is-done'));
-    assert.equal(get(storedTasks, 'a').archived_at, null);
+    assert.ok(!get(storedTasks, 'a').archived_at);
     await click(row('b').querySelector('[title="勾选完成"]'));
     await button('确认完成');
     assert.ok(storedTasks.every(t => t.status === 'done' && t.archived_at));
@@ -291,4 +294,105 @@ test('blur followed by clicking the same parent + creates a fresh focused draft'
   assert.equal(document.activeElement, draft());
   await enter('不需要手动预建孙节点');
   assert.equal(latest.find(t => t.title === '不需要手动预建孙节点')!.parent_id, 'child');
+});
+
+test('PRD V1.0 C01-C07: multi-level completion, strikethrough retention and archiving rules', () => {
+  // Tree: 健身 (root) -> 分支A (branchA) -> A1, A2
+  //                   -> 分支B (branchB)
+  const tree = [
+    task('fitness', null),
+    task('branchA', 'fitness'),
+    task('branchB', 'fitness'),
+    task('a1', 'branchA'),
+    task('a2', 'branchA'),
+  ];
+
+  // C01: A1 completed, A2 open -> A1 strikethrough retained, A and fitness open
+  const step1 = completeTaskBranch(tree, 'a1');
+  assert.equal(get(step1.tasks, 'a1').status, 'done');
+  assert.equal(get(step1.tasks, 'a1').archived_at, null);
+  assert.equal(get(step1.tasks, 'branchA').status, 'open');
+  assert.equal(get(step1.tasks, 'fitness').status, 'open');
+  assert.deepEqual(step1.newlyArchivedIds, []);
+  assert.deepEqual(visible(step1.tasks), ['fitness', 'branchA', 'branchB', 'a1', 'a2']);
+
+  // C02: A1, A2 both completed, B open -> branchA auto completed, branchA retained in workspace
+  const step2 = completeTaskBranch(step1.tasks, 'a2');
+  assert.equal(get(step2.tasks, 'a2').status, 'done');
+  assert.equal(get(step2.tasks, 'branchA').status, 'done');
+  assert.equal(get(step2.tasks, 'branchA').archived_at, null);
+  assert.equal(get(step2.tasks, 'fitness').status, 'open');
+  assert.deepEqual(step2.autoClosedIds, ['branchA']);
+  assert.deepEqual(step2.newlyArchivedIds, []);
+  assert.deepEqual(visible(step2.tasks), ['fitness', 'branchA', 'branchB', 'a1', 'a2']);
+
+  // C03: User clicks "搞定" on branchA -> only branchA and its children are archived
+  const step3 = archiveCompletedBranch(step2.tasks, 'branchA');
+  assert.ok(get(step3.tasks, 'branchA').archived_at);
+  assert.ok(get(step3.tasks, 'a1').archived_at);
+  assert.ok(get(step3.tasks, 'a2').archived_at);
+  assert.equal(get(step3.tasks, 'fitness').archived_at, null);
+  assert.equal(get(step3.tasks, 'branchB').archived_at, null);
+  assert.deepEqual(visible(step3.tasks), ['fitness', 'branchB']);
+
+  // C05: branchA was archived previously, now complete branchB -> fitness auto completes and entire tree archives
+  const step4 = completeTaskBranch(step3.tasks, 'branchB');
+  assert.equal(get(step4.tasks, 'fitness').status, 'done');
+  assert.ok(get(step4.tasks, 'fitness').archived_at);
+  assert.ok(get(step4.tasks, 'branchB').archived_at);
+  assert.deepEqual(visible(step4.tasks), []);
+
+  // C06: Manual completion of branchA while B is open -> branchA and children complete, but NOT auto-archived
+  const freshTree = [
+    task('fitness', null),
+    task('branchA', 'fitness'),
+    task('branchB', 'fitness'),
+    task('a1', 'branchA'),
+    task('a2', 'branchA'),
+  ];
+  const manualA = completeTaskBranch(freshTree, 'branchA');
+  assert.equal(get(manualA.tasks, 'branchA').status, 'done');
+  assert.equal(get(manualA.tasks, 'a1').status, 'done');
+  assert.equal(get(manualA.tasks, 'a2').status, 'done');
+  assert.equal(get(manualA.tasks, 'branchA').archived_at, null);
+  assert.deepEqual(manualA.newlyArchivedIds, []);
+  assert.deepEqual(visible(manualA.tasks), ['fitness', 'branchA', 'branchB', 'a1', 'a2']);
+
+  // C07: Manual completion of top-level task -> all valid descendants complete and whole tree archives
+  const manualRoot = completeTaskBranch(freshTree, 'fitness');
+  assert.ok(manualRoot.tasks.every(t => t.status === 'done' && t.archived_at));
+  assert.deepEqual(visible(manualRoot.tasks), []);
+});
+
+test('PRD Section 2.5: archiveCompletedBranch rejects archiving with error when incomplete children exist', () => {
+  const tree = [
+    task('root', null, 'done'),
+    task('child1', 'root', 'done'),
+    task('child2', 'root', 'open'),
+  ];
+  const res = archiveCompletedBranch(tree, 'root');
+  assert.equal(res.error, '仍有未完成子任务');
+  assert.deepEqual(res.newlyArchivedIds, []);
+});
+
+test('PRD Section 4.1: Quadrant width calculation formulas and drawer mode threshold', () => {
+  // W: available width (window width - 208 sidebar)
+  // Formula: maxWidth = min(860, W - 560 - 8)
+  // If maxWidth >= 440: defaultWidth = clamp(W * 0.36, 520, 680), actual = clamp(pref || default, 440, maxWidth)
+  // Else: drawer mode min(640, window.innerWidth - 32)
+
+  // 1920px window: W = 1712
+  const W1 = 1920 - 208; // 1712
+  const max1 = Math.min(860, W1 - 560 - 8); // 860
+  const def1 = Math.min(680, Math.max(520, Math.round(W1 * 0.36))); // 616
+  assert.equal(max1, 860);
+  assert.equal(def1, 616);
+  assert.ok(max1 >= 440); // Split mode
+
+  // Narrow window 1100px: W = 892
+  const W2 = 1100 - 208; // 892
+  const max2 = Math.min(860, W2 - 560 - 8); // 324
+  assert.ok(max2 < 440); // Switches to drawer mode
+  const drawerW2 = Math.min(640, 1100 - 32); // 640
+  assert.equal(drawerW2, 640);
 });

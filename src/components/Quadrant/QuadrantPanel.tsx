@@ -17,11 +17,10 @@ import {
   GripVertical,
   Check,
   Info,
-  ArrowDownCircle,
   X
 } from 'lucide-react';
 
-interface QuadrantPanelProps {
+export interface QuadrantPanelProps {
   tasks: TaskNode[];
   onUpdateQuadrant: (taskId: string, quadrant: QuadrantType) => void;
   onToggleComplete: (task: TaskNode) => void;
@@ -30,6 +29,9 @@ interface QuadrantPanelProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   onClose?: () => void;
+  width?: number;
+  isDrawer?: boolean;
+  isDraggingWidth?: boolean;
 }
 
 export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
@@ -41,6 +43,9 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
   isCollapsed,
   onToggleCollapse,
   onClose,
+  width = 560,
+  isDrawer = false,
+  isDraggingWidth = false,
 }) => {
   const [levelFilter, setLevelFilter] = useState<QuadrantLevelFilter>('all');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
@@ -59,6 +64,9 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
       if (e.key === 'Escape') {
         setDragOverQuadrant(null);
         cleanupDragGhost(ghostRef.current);
+        if (isDrawer && (onClose || onToggleCollapse)) {
+          (onClose || onToggleCollapse)();
+        }
       }
     };
 
@@ -68,14 +76,14 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
       window.removeEventListener('dragend', handleWindowDragEnd);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [isDrawer, onClose, onToggleCollapse]);
 
   if (isCollapsed) {
     return (
       <div className="w-12 h-screen flex-shrink-0 bg-white border-l border-slate-200/80 flex flex-col items-center py-6 select-none">
         <button
           onClick={onToggleCollapse}
-          className="w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-100 flex items-center justify-center transition-colors mb-6"
+          className="w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-100 flex items-center justify-center transition-colors mb-6 cursor-pointer"
           title="展开四象限看板"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -87,7 +95,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
     );
   }
 
-  // Filter tasks based on level mode
+  // Filter tasks based on level mode (only active non-deleted open tasks)
   const activeTasks = tasks.filter(t => !t.deleted_at && t.status === 'open');
 
   const filteredTasks = activeTasks.filter(t => {
@@ -132,13 +140,25 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
     }, 0);
   };
 
-  // Robust drag over without flickering
+  // Robust drag over without flickering with edge auto-scrolling
   const handleDragOver = (e: React.DragEvent, qKey: string) => {
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
     if (dragOverQuadrant !== qKey) {
       setDragOverQuadrant(qKey);
+    }
+
+    // Auto-scroll list when dragging near edges (PRD Section 4.2)
+    const container = e.currentTarget as HTMLElement;
+    const listEl = container.querySelector('.quadrant-task-list') as HTMLElement | null;
+    if (listEl) {
+      const rect = listEl.getBoundingClientRect();
+      if (e.clientY - rect.top < 32 && listEl.scrollTop > 0) {
+        listEl.scrollTop -= 8;
+      } else if (rect.bottom - e.clientY < 32) {
+        listEl.scrollTop += 8;
+      }
     }
   };
 
@@ -175,13 +195,13 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
     leaf_only: '仅末级任务',
   };
 
-  // Quadrant configurations
+  // Quadrant visual configurations
   const quadrantMeta = {
     Q1: {
       title: '重要且紧急',
       dotColor: 'bg-red-500',
       activeBorder: 'border-2 !border-red-500 bg-red-100/60 ring-2 ring-red-200/80 shadow-md',
-      normalBg: 'bg-red-50/30',
+      normalBg: 'bg-red-50/20',
       normalBorder: 'border-red-100',
       tagText: 'text-red-600',
       promptText: '松手设为重要且紧急',
@@ -190,7 +210,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
       title: '重要不紧急',
       dotColor: 'bg-blue-500',
       activeBorder: 'border-2 !border-blue-500 bg-blue-100/60 ring-2 ring-blue-200/80 shadow-md',
-      normalBg: 'bg-blue-50/30',
+      normalBg: 'bg-blue-50/20',
       normalBorder: 'border-blue-100',
       tagText: 'text-blue-600',
       promptText: '松手设为重要不紧急',
@@ -199,7 +219,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
       title: '紧急不重要',
       dotColor: 'bg-amber-500',
       activeBorder: 'border-2 !border-amber-500 bg-amber-100/60 ring-2 ring-amber-200/80 shadow-md',
-      normalBg: 'bg-amber-50/30',
+      normalBg: 'bg-amber-50/20',
       normalBorder: 'border-amber-100',
       tagText: 'text-amber-700',
       promptText: '松手设为紧急不重要',
@@ -208,7 +228,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
       title: '不重要不紧急',
       dotColor: 'bg-slate-400',
       activeBorder: 'border-2 !border-slate-500 bg-slate-100/90 ring-2 ring-slate-300 shadow-md',
-      normalBg: 'bg-slate-50',
+      normalBg: 'bg-slate-50/40',
       normalBorder: 'border-slate-200/70',
       tagText: 'text-slate-600',
       promptText: '松手设为不重要不紧急',
@@ -243,7 +263,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
           </span>
         </div>
 
-        {/* Content Area: when dragging over, display centered drop target matching mockup */}
+        {/* Content Area: when dragging over, display centered drop target */}
         {isDragTarget ? (
           <div className="flex-1 flex flex-col items-center justify-center p-3 pointer-events-none animate-in fade-in zoom-in-95 duration-100 select-none">
             <div className={`${meta.tagText} mb-2`}>
@@ -253,18 +273,16 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
                 <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
               </svg>
             </div>
-            <div className="text-xs font-bold text-slate-800 text-center leading-snug">
-              松手设为
-              <br />
-              {meta.title}
+            <div className={`text-xs font-bold ${meta.tagText}`}>
+              {meta.promptText}
             </div>
             <div className="text-[10px] text-slate-400 mt-2 text-center">
               仅修改此任务
             </div>
           </div>
         ) : (
-          /* Normal Task Cards List */
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
+          /* Normal Task Cards List (PRD Section 4.2 specifications) */
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5 quadrant-task-list">
             {tasksList.length === 0 ? (
               <div className="h-full flex items-center justify-center text-xs py-6 border border-dashed border-slate-200/80 rounded-xl text-slate-400">
                 拖拽任务至此处
@@ -281,35 +299,41 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
                     draggable
                     onDragStart={(e) => handleDragStart(e, task)}
                     onClick={() => onSelectTask(task)}
-                    className={`bg-white rounded-xl p-2.5 shadow-xs border transition-all cursor-pointer group flex items-start gap-2 ${
+                    className={`bg-white rounded-xl p-2.5 shadow-2xs border transition-all cursor-pointer group flex items-start gap-2 ${
                       isSelected ? 'border-blue-400 ring-2 ring-blue-50' : 'border-slate-200/70 hover:border-slate-300'
                     }`}
                   >
+                    {/* Fixed slot for checkbox (PRD Section 4.2) */}
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         onToggleComplete(task);
                       }}
-                      className="w-4 h-4 rounded mt-0.5 flex-shrink-0 flex items-center justify-center border border-slate-300 hover:border-blue-500 bg-white"
+                      className="w-4 h-4 rounded mt-0.5 flex-shrink-0 flex items-center justify-center border border-slate-300 hover:border-blue-500 bg-white cursor-pointer transition-colors"
+                      title="标记为完成"
                     >
                       {task.status === 'done' && <Check className="w-3 h-3 text-blue-600 stroke-[3]" />}
                     </button>
 
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs font-semibold text-slate-800 truncate">
+                      {/* Title: 14px (text-sm), max 2 lines, ellipsis (PRD Section 4.2) */}
+                      <div className="text-sm font-medium text-slate-800 line-clamp-2 break-words leading-snug">
                         {task.title}
                       </div>
 
+                      {/* Ancestor path: 12px (text-xs), single-line ellipsis (PRD Section 4.2) */}
                       {ancestors.length > 0 && (
-                        <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                        <div className="text-xs text-slate-400 truncate mt-0.5">
                           {ancestors.join(' / ')}
                         </div>
                       )}
 
+                      {/* Secondary info row: date, overdue, etc. (PRD Section 4.2) */}
                       {dateInfo.label !== '-' && (
-                        <div className="mt-1">
+                        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                           <span
-                            className={`text-[10px] font-semibold px-1.5 py-0.2 rounded ${
+                            className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${
                               dateInfo.isOverdue
                                 ? 'text-red-600 bg-red-50'
                                 : dateInfo.isToday
@@ -323,6 +347,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
                       )}
                     </div>
 
+                    {/* Fixed slot for drag handle (PRD Section 4.2) */}
                     <div className="text-slate-300 group-hover:text-slate-500 cursor-grab pt-0.5 flex-shrink-0">
                       <GripVertical className="w-3.5 h-3.5" />
                     </div>
@@ -338,8 +363,19 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
 
   const isUnclassifiedDragTarget = dragOverQuadrant === 'null';
 
-  return (
-    <aside className="w-[420px] max-w-full h-screen flex-shrink-0 bg-white border-l border-slate-200/90 shadow-2xl z-40 flex flex-col p-4 select-none overflow-hidden animate-in slide-in-from-right duration-200">
+  const panelContent = (
+    <aside
+      className={`h-screen bg-white border-l border-slate-200/90 flex flex-col p-4 select-none overflow-hidden ${
+        isDrawer
+          ? 'fixed inset-y-0 right-0 z-50 shadow-2xl animate-in slide-in-from-right duration-200'
+          : 'flex-shrink-0 shadow-xs z-30'
+      }`}
+      style={{
+        width: width,
+        maxWidth: isDrawer ? 'min(640px, calc(100vw - 32px))' : undefined,
+        transition: isDraggingWidth ? 'none' : 'width 200ms cubic-bezier(0.2, 0, 0, 1)',
+      }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between pb-2 flex-shrink-0">
         <div>
@@ -352,7 +388,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
           <div className="relative">
             <button
               onClick={() => setShowFilterDropdown(!showFilterDropdown)}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
             >
               <span>{levelFilterLabels[levelFilter]}</span>
               <ChevronDown className="w-3 h-3 text-slate-400" />
@@ -367,7 +403,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
                       setLevelFilter(mode);
                       setShowFilterDropdown(false);
                     }}
-                    className={`w-full text-left px-2.5 py-1.5 text-xs rounded-lg ${
+                    className={`w-full text-left px-2.5 py-1.5 text-xs rounded-lg cursor-pointer ${
                       levelFilter === mode ? 'bg-blue-50 text-blue-600 font-semibold' : 'text-slate-600 hover:bg-slate-50'
                     }`}
                   >
@@ -381,7 +417,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
           {/* Close / Collapse Button */}
           <button
             onClick={onClose || onToggleCollapse}
-            className="w-7 h-7 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center transition-colors"
+            className="w-7 h-7 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer"
             title="关闭四象限速览"
           >
             {onClose ? <X className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
@@ -389,7 +425,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
         </div>
       </div>
 
-      {/* 2x2 Matrix (PRD v1.1 Section 7.1) */}
+      {/* 2x2 Matrix: equal width & height (PRD Section 4.2: 两列等宽，两行等高) */}
       <div
         className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2 gap-3 my-2"
         style={{ gridTemplateRows: 'minmax(0, 1fr) minmax(0, 1fr)' }}
@@ -407,7 +443,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
         {renderQuadrantBox('Q4', q4Tasks)}
       </div>
 
-      {/* Bottom Unclassified Section (PRD v1.1 Section 7.1 max-height ≤ 120px, collapsible) */}
+      {/* Bottom Unclassified Section (PRD Section 4.2: 固定在面板下方，可折叠，默认最高 120px，超出后内部滚动) */}
       <div className="pt-2 border-t border-slate-100 flex-shrink-0">
         <div
           onDragOver={(e) => handleDragOver(e, 'null')}
@@ -436,7 +472,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
               <button
                 type="button"
                 onClick={() => setIsUnclassifiedCollapsed(!isUnclassifiedCollapsed)}
-                className="w-5 h-5 rounded hover:bg-slate-200/60 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors ml-1"
+                className="w-5 h-5 rounded hover:bg-slate-200/60 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors ml-1 cursor-pointer"
                 title={isUnclassifiedCollapsed ? '展开未分类' : '折叠未分类'}
               >
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isUnclassifiedCollapsed ? '-rotate-90' : ''}`} />
@@ -457,7 +493,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
                 <div className="text-xs font-bold text-purple-700">松手移入未分类 (清除象限)</div>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-1.5 max-h-[85px] overflow-y-auto">
+              <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto pr-0.5">
                 {unclassifiedTasks.length === 0 ? (
                   <span className="text-[11px] text-slate-400 py-1">暂无未分类任务</span>
                 ) : (
@@ -469,7 +505,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
                       onClick={() => onSelectTask(task)}
                       className="px-2 py-0.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 hover:border-blue-400 hover:text-blue-600 transition-colors cursor-grab flex items-center gap-1 shadow-2xs"
                     >
-                      <span className="truncate max-w-[90px]">{task.title}</span>
+                      <span className="truncate max-w-[120px]">{task.title}</span>
                     </div>
                   ))
                 )}
@@ -486,4 +522,19 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
       </div>
     </aside>
   );
+
+  if (isDrawer) {
+    return (
+      <>
+        {/* Backdrop for Drawer Mode */}
+        <div
+          className="fixed inset-0 bg-slate-900/20 backdrop-blur-xs z-40 transition-opacity cursor-pointer"
+          onClick={onClose || onToggleCollapse}
+        />
+        {panelContent}
+      </>
+    );
+  }
+
+  return panelContent;
 };

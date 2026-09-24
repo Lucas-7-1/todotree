@@ -38,6 +38,7 @@ import { Header } from './components/Header';
 import { TaskTree } from './components/TaskTree/TaskTree';
 import { QuickInputBar } from './components/QuickInputBar';
 import { QuadrantPanel } from './components/Quadrant/QuadrantPanel';
+import { VerticalSplitter } from './components/Quadrant/VerticalSplitter';
 import { QuadrantWorkspace } from './components/Quadrant/QuadrantWorkspace';
 import { TaskDetailDrawer } from './components/TaskDrawer/TaskDetailDrawer';
 import { TodayView } from './components/TodayView/TodayView';
@@ -85,7 +86,64 @@ export const App: React.FC = () => {
   const [auxiliaryPanel, setAuxiliaryPanel] = useState<{
     type: AuxiliaryPanelType;
     data?: any;
-  }>({ type: 'none' });
+  }>(() => {
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage.getItem('todotree_quadrant_open') === 'true') {
+        return { type: 'quadrant_quick' };
+      }
+    } catch {}
+    return { type: 'none' };
+  });
+
+  // Quadrant sizing & splitter (PRD Section 4 & 5)
+  const [windowWidth, setWindowWidth] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth : 1920
+  );
+  const [userQuadrantWidth, setUserQuadrantWidth] = useState<number | null>(() => {
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      const raw = localStorage.getItem('todotree_quadrant_width');
+      if (!raw) return null;
+      const parsed = parseFloat(raw);
+      return !isNaN(parsed) && parsed >= 440 && parsed <= 1200 ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isDraggingSplitter, setIsDraggingSplitter] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const availableWidth = Math.max(0, windowWidth - 208);
+  const maxQuadrantWidth = Math.min(860, Math.max(0, availableWidth - 560 - 8));
+  const isQuadrantDrawerMode = maxQuadrantWidth < 440;
+  const defaultQuadrantWidth = Math.min(680, Math.max(520, Math.round(availableWidth * 0.36)));
+  const actualQuadrantWidth = isQuadrantDrawerMode
+    ? Math.min(640, windowWidth - 32)
+    : Math.min(maxQuadrantWidth, Math.max(440, userQuadrantWidth ?? defaultQuadrantWidth));
+
+  const handleQuadrantResize = useCallback((newWidth: number) => {
+    setUserQuadrantWidth(newWidth);
+  }, []);
+
+  const handleQuadrantResizeEnd = useCallback((finalWidth: number) => {
+    setUserQuadrantWidth(finalWidth);
+    try {
+      localStorage.setItem('todotree_quadrant_width', finalWidth.toString());
+    } catch {}
+  }, []);
+
+  const handleQuadrantResetDefault = useCallback(() => {
+    setUserQuadrantWidth(defaultQuadrantWidth);
+    try {
+      localStorage.setItem('todotree_quadrant_width', defaultQuadrantWidth.toString());
+    } catch {}
+  }, [defaultQuadrantWidth]);
+
   const [reviewActiveReport, setReviewActiveReport] = useState<SavedReport | null>(null);
   const [reviewSavedReports, setReviewSavedReports] = useState<SavedReport[]>([]);
 
@@ -104,11 +162,17 @@ export const App: React.FC = () => {
     if (type !== 'task_detail') {
       setSelectedTaskId(null);
     }
+    try {
+      localStorage.setItem('todotree_quadrant_open', type === 'quadrant_quick' ? 'true' : 'false');
+    } catch {}
   }, []);
 
   const closeAuxiliaryPanel = useCallback(() => {
     setAuxiliaryPanel({ type: 'none' });
     setSelectedTaskId(null);
+    try {
+      localStorage.setItem('todotree_quadrant_open', 'false');
+    } catch {}
   }, []);
 
   const handleSelectTask = useCallback((task: TaskNode | null) => {
@@ -640,8 +704,13 @@ export const App: React.FC = () => {
 
   const handleArchiveCompleted = (task: TaskNode) => {
     const currentTasks = tasksRef.current;
-    const nextTasks = archiveCompletedBranch(currentTasks, task.id);
-    if (nextTasks === currentTasks) return;
+    const result = archiveCompletedBranch(currentTasks, task.id);
+    if (result.error) {
+      setToast({ id: 'archive-err-' + Date.now(), type: 'error', title: result.error });
+      return;
+    }
+    const nextTasks = result.tasks;
+    if (nextTasks === currentTasks || !result.newlyArchivedIds.length) return;
     const description = `已归档「${task.title}」`;
     undoManager.pushTaskDiff(description, currentTasks, nextTasks);
     setUndoStackVersion(v => v + 1);
@@ -1583,15 +1652,33 @@ export const App: React.FC = () => {
       )}
 
       {auxiliaryPanel.type === 'quadrant_quick' && (
-        <QuadrantPanel
-          tasks={tasks}
-          onUpdateQuadrant={handleUpdateQuadrant}
-          onToggleComplete={handleToggleComplete}
-          onSelectTask={handleSelectTask}
-          selectedTaskId={selectedTaskId}
-          isCollapsed={false}
-          onToggleCollapse={closeAuxiliaryPanel}
-        />
+        <>
+          {!isQuadrantDrawerMode && (
+            <VerticalSplitter
+              currentWidth={actualQuadrantWidth}
+              minWidth={440}
+              maxWidth={maxQuadrantWidth}
+              defaultWidth={defaultQuadrantWidth}
+              onResize={handleQuadrantResize}
+              onResizeEnd={handleQuadrantResizeEnd}
+              onResetDefault={handleQuadrantResetDefault}
+              onDragStateChange={setIsDraggingSplitter}
+            />
+          )}
+          <QuadrantPanel
+            tasks={tasks}
+            onUpdateQuadrant={handleUpdateQuadrant}
+            onToggleComplete={handleToggleComplete}
+            onSelectTask={handleSelectTask}
+            selectedTaskId={selectedTaskId}
+            isCollapsed={false}
+            onToggleCollapse={closeAuxiliaryPanel}
+            onClose={closeAuxiliaryPanel}
+            width={actualQuadrantWidth}
+            isDrawer={isQuadrantDrawerMode}
+            isDraggingWidth={isDraggingSplitter}
+          />
+        </>
       )}
 
       {auxiliaryPanel.type === 'task_detail' && selectedTask && (
