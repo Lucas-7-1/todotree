@@ -1,3 +1,6 @@
+import { filterEffectiveCompletionEvents } from '../src/services/calendarService';
+import { buildTransitionEvents } from '../src/services/transitionEvents';
+import { applyBulkAction } from '../src/services/bulkTasks';
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import React, { act, useState } from 'react';
@@ -34,7 +37,7 @@ test('搞定 archives only the completed child; last sibling still closes the wh
   let tasks = completeTaskBranch([task('root'), task('a', 'root'), task('b', 'root')], 'a').tasks;
   const completionTime = get(tasks, 'a').completed_at;
   const beforeArchive = tasks;
-  tasks = archiveCompletedBranch(tasks, 'a');
+  tasks = archiveCompletedBranch(tasks, 'a').tasks;
   assert.deepEqual(visible(tasks), ['root', 'b']);
   assert.equal(get(tasks, 'a').completed_at, completionTime);
   undoManager.pushTaskDiff('archive', beforeArchive, tasks);
@@ -51,6 +54,14 @@ test('nested branch auto-closes with strikethrough retention without closing unf
   assert.ok(visible(first).includes('a'));
   const last = completeTaskBranch(first, 'b');
   assert.deepEqual(last.autoClosedIds, ['branch']);
+  assert.deepEqual(visible(last.tasks), ['root', 'branch', 'other', 'a', 'b']);
+  undoManager.pushTaskDiff('last child', first, last.tasks);
+  const restored = undoManager.undo(last.tasks)!.newTasks;
+  assert.deepEqual(visible(restored), ['root', 'branch', 'other', 'a', 'b']);
+  assert.equal(get(restored, 'a').status, 'done');
+  assert.equal(get(restored, 'b').status, 'open');
+  assert.deepEqual(visible(undoManager.redo(restored)!.newTasks), ['root', 'branch', 'other', 'a', 'b']);
+
   // PRD V1.0: Intermediate branch auto-completes, but retains strikethrough until top-level completes or explicit "搞定"
   assert.deepEqual(visible(last.tasks), ['root', 'branch', 'other', 'a', 'b']);
   assert.equal(get(last.tasks, 'branch').status, 'done');
@@ -103,8 +114,8 @@ test('five levels allowed; sixth level, missing parent and empty title rejected'
 
 test('archival metadata survives backup/import and cannot be archived while open', () => {
   const tasks = completeTaskBranch([task('root'), task('a', 'root'), task('b', 'root')], 'a').tasks;
-  assert.equal(archiveCompletedBranch(tasks, 'b'), tasks);
-  const archived = archiveCompletedBranch(tasks, 'a');
+  assert.equal(archiveCompletedBranch(tasks, 'b').tasks, tasks);
+  const archived = archiveCompletedBranch(tasks, 'a').tasks;
   const backup = exportBackupData(archived, { timezone: 'Asia/Shanghai', reduced_motion: true, show_completed: false, schema_version: 2 });
   const imported = validateImportJson(backup);
   assert.equal(imported.valid, true);
@@ -113,13 +124,19 @@ test('archival metadata survives backup/import and cannot be archived while open
 
 let latest: TaskNode[] = [];
 let nextId = 0;
-function Harness({ initial, reject = false }: { initial: TaskNode[]; reject?: boolean }) {
+let batchCalls = 0;
+let batchFailure = false;
+function Harness({ initial, reject = false, bulk = false }: { initial: TaskNode[]; reject?: boolean; bulk?: boolean }) {
   const [tasks, setTasks] = useState(initial);
   latest = tasks;
   const noop = () => {};
-  return <TaskTree tasks={tasks} selectedTaskId={null} onSelectTask={noop}
+  return <TaskTree tasks={tasks} onBulkAction={bulk ? async (ids, action) => {
+    batchCalls++;
+    if (batchFailure) return false;
+    const result = applyBulkAction(tasks, ids, action); setTasks(result.tasks); return true;
+  } : undefined} selectedTaskId={null} onSelectTask={noop}
     onToggleComplete={t => setTasks(prev => t.status === 'done' ? reopenTaskBranch(prev, t.id) : completeTaskBranch(prev, t.id).tasks)}
-    onArchiveCompleted={t => setTasks(prev => archiveCompletedBranch(prev, t.id))}
+    onArchiveCompleted={t => setTasks(prev => archiveCompletedBranch(prev, t.id).tasks)}
     onUpdateTitle={noop} onUpdateQuadrant={noop} onUpdateDue={noop} onAddChild={noop}
     onAddTaskInline={(parent, title) => {
       if (reject) return null;
@@ -129,12 +146,12 @@ function Harness({ initial, reject = false }: { initial: TaskNode[]; reject?: bo
     }} onDeleteTask={noop} onDuplicateTask={noop} onTogglePlannedToday={noop} onMoveNode={noop}
     onOpenCompletedDrawer={noop} reducedMotion searchQuery="" onShowErrorToast={noop} />;
 }
-async function mount(initial: TaskNode[], reject = false) {
+async function mount(initial: TaskNode[], reject = false, bulk = false) {
   const host = document.createElement('div'); document.body.append(host);
   root = createRoot(host);
-  await act(() => root!.render(<Harness initial={initial} reject={reject} />));
+  await act(() => root!.render(<Harness initial={initial} reject={reject} bulk={bulk} />));
 }
-async function click(el: Element | null) { assert.ok(el); await act(() => (el as HTMLElement).click()); }
+async function click(el: Element | null) { assert.ok(el); await act(async () => { (el as HTMLElement).click(); await Promise.resolve(); }); }
 async function button(text: string) { const el = [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === text); await click(el!); }
 function row(id: string) { return document.querySelector(`[data-task-id="${id}"]`)!; }
 function draft() { return document.querySelector('input[placeholder^="输入子任务名称"]') as HTMLInputElement; }
@@ -232,17 +249,21 @@ test('App integration: completion, archive, toast undo, parent closure and reloa
   const oldFetch = globalThis.fetch;
   const oldWarn = console.warn;
   console.warn = () => {}; // IndexedDB is deliberately unavailable; API/localStorage are the test stores.
+  (window as any).__TODOTREE_DESKTOP__ = true;
+  let serverState = { schema_version: 2, revision: 0, operation_id: 'init', saved_at: timestamp,
+    data: { tasks: storedTasks, events: [], settings: { timezone: 'Asia/Shanghai', reduced_motion: true, schema_version: 2 }, ai_settings: {}, reports: [], attempts: [] } };
   globalThis.fetch = async (input, options) => {
     const url = String(input);
-    if (options?.method === 'POST') {
-      const value = JSON.parse(String(options.body));
-      if (url === '/api/tasks') storedTasks = value;
-      else endpointData.set(url, value);
+    if (url === '/api/workspace') {
+      if (options?.method === 'POST') {
+        const op = JSON.parse(String(options.body));
+        assert.equal(op.expected_revision, serverState.revision);
+        serverState = { ...serverState, revision: serverState.revision + 1, operation_id: op.operation_id, data: op.data };
+        storedTasks = op.data.tasks;
+      }
+      return new Response(JSON.stringify(serverState));
     }
-    const value = url === '/api/tasks' ? storedTasks : url.includes('health')
-      ? { status: 'ok', instance_id: 'test', db_ready: true }
-      : endpointData.get(url) ?? (url.includes('settings') ? {} : []);
-    return new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify(url.includes('health') ? { status: 'ok', instance_id: 'test', db_ready: true } : {}));
   };
   const mountApp = async () => {
     localStorage.setItem('todotree_settings_v1', JSON.stringify({ timezone: 'Asia/Shanghai', reduced_motion: true, schema_version: 2 }));
@@ -294,6 +315,95 @@ test('blur followed by clicking the same parent + creates a fresh focused draft'
   assert.equal(document.activeElement, draft());
   await enter('不需要手动预建孙节点');
   assert.equal(latest.find(t => t.title === '不需要手动预建孙节点')!.parent_id, 'child');
+});
+
+
+test('batch completion deduplicates parent and child and retains intermediate branch', () => {
+  const before = [task('root'), task('A', 'root'), task('a1', 'A'), task('a2', 'A'), task('B', 'root')];
+  const result = applyBulkAction(before, ['A', 'a1'], { type: 'complete' });
+  assert.equal(result.changedCount, 3);
+  assert.equal(get(result.tasks, 'A').status, 'done');
+  assert.equal(get(result.tasks, 'root').status, 'open');
+  assert.ok(result.tasks.every(t => !t.archived_at));
+  undoManager.pushTaskDiff('batch', before, result.tasks);
+  assert.ok(undoManager.undo(result.tasks)!.newTasks.every(t => t.status === 'open'));
+});
+
+test('bulk properties affect explicit selection only and today/deletion batch undo is exact', () => {
+  const before = [task('root'), task('A', 'root'), task('a1', 'A')];
+  const dated = applyBulkAction(before, ['A'], { type: 'today', value: '2026-09-24' }).tasks;
+  assert.equal(get(dated, 'a1').planned_date, null);
+  undoManager.pushTaskDiff('today', before, dated);
+  assert.equal(get(undoManager.undo(dated)!.newTasks, 'A').planned_date, null);
+  const deleted = applyBulkAction(before, ['A', 'a1'], { type: 'delete' }).tasks;
+  assert.equal(get(deleted, 'A').deletion_batch_id, get(deleted, 'a1').deletion_batch_id);
+  assert.equal(get(deleted, 'root').deleted_at, null);
+  undoManager.pushTaskDiff('delete', before, deleted);
+  const restored = undoManager.undo(deleted)!.newTasks;
+  assert.equal(get(restored, 'a1').deleted_at, null);
+  assert.equal(get(restored, 'a1').deletion_batch_id, null);
+});
+
+test('archive refuses unfinished descendants and skips no completed history', () => {
+  assert.throws(() => applyBulkAction([task('A', null, 'done'), task('a', 'A')], ['A'], { type: 'archive' }), /未完成/);
+  const before = [task('root'), task('a', 'root', 'done'), task('b', 'root')];
+  const result = applyBulkAction(before, ['a', 'b'], { type: 'complete' });
+  assert.equal(result.skippedCount, 1);
+  assert.ok(result.tasks.every(t => t.archived_at));
+  assert.equal(get(result.tasks, 'a').completed_at, timestamp);
+});
+
+test('actual UI queues two completions and commits them once', async () => {
+  batchCalls = 0; batchFailure = false;
+  await mount([task('root'), task('a', 'root'), task('b', 'root')], false, true);
+  await button('全部展开');
+  await click(row('a').querySelector('[title="勾选完成"]'));
+  await click(row('b').querySelector('[title="勾选完成"]'));
+  assert.ok(row('a').querySelector('[title="取消勾选"]'));
+  assert.ok(row('b').querySelector('[title="取消勾选"]'));
+  assert.equal(document.querySelectorAll('button').length > 0, true);
+  assert.ok(latest.every(t => t.status === 'open'));
+  assert.equal([...document.querySelectorAll('button')].filter(b => b.textContent === '确认完成').length, 1);
+  await button('确认完成');
+  assert.equal(batchCalls, 1);
+  assert.ok(latest.every(t => t.archived_at));
+});
+
+test('failed batch keeps pending checks for retry', async () => {
+  batchCalls = 0; batchFailure = true;
+  await mount([task('root'), task('a', 'root'), task('b', 'root')], false, true);
+  await button('全部展开');
+  await click(row('a').querySelector('[title="勾选完成"]')); await click(row('b').querySelector('[title="勾选完成"]'));
+  await button('确认完成');
+  assert.ok(row('a').querySelector('[title="取消勾选"]'));
+  assert.ok(latest.every(t => t.status === 'open'));
+  batchFailure = false; await button('确认完成');
+  assert.ok(latest.every(t => t.status === 'done'));
+});
+
+test('explicit selection does not complete; Delete previews deduplicated subtree', async () => {
+  batchFailure = false; batchCalls = 0;
+  await mount([task('root'), task('A', 'root'), task('a', 'A'), task('B', 'root')], false, true);
+  await button('全部展开'); await button('多选');
+  await click(document.querySelector('[aria-label="选择 A"]'));
+  await click(document.querySelector('[aria-label="选择 a"]'));
+  assert.ok(latest.every(t => t.status === 'open'));
+  await act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })));
+  assert.ok(document.querySelector('[aria-label="确认批量操作"]'));
+  await button('确认移入回收站');
+  assert.equal(batchCalls, 1);
+  assert.ok(get(latest, 'A').deleted_at && get(latest, 'a').deleted_at);
+  assert.equal(get(latest, 'B').deleted_at, null);
+});
+
+
+test('undo with a distinct operation id removes completion from calendar; redo restores exactly once', () => {
+  const before = [task('a')];
+  const done = [{ ...task('a'), status: 'done' as const, completed_at: timestamp }];
+  const events = [...buildTransitionEvents(before, done), ...buildTransitionEvents(done, before)];
+  assert.equal(filterEffectiveCompletionEvents(events).length, 0);
+  assert.equal(filterEffectiveCompletionEvents([...events, ...buildTransitionEvents(before, done)]).length, 1);
+
 });
 
 test('PRD V1.0 C01-C07: multi-level completion, strikethrough retention and archiving rules', () => {

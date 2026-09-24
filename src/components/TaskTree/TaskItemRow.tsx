@@ -14,7 +14,6 @@ import {
 } from '../../services/treeOperations';
 import { createDragGhost, cleanupDragGhost } from '../../services/dragGhost';
 import { formatRecurrenceSummary } from '../../services/recurrence';
-import { willCompletionArchiveTree } from '../../services/taskLifecycle';
 import {
   ChevronRight,
   ChevronDown,
@@ -34,6 +33,11 @@ import { TaskQuadrantMenuPortal } from './TaskQuadrantMenuPortal';
 import { MatchSnippet } from '../../services/filterEngine';
 
 interface TaskItemRowProps {
+  queuedCompletion?: boolean;
+  onQueueCompletion?: (id: string) => void;
+  selectionMode?: boolean;
+  bulkSelected?: boolean;
+  onBulkSelect?: (id: string, range: boolean) => void;
   task: TaskNode;
   allTasks: TaskNode[];
   level: number;
@@ -64,6 +68,7 @@ interface TaskItemRowProps {
 }
 
 export const TaskItemRow: React.FC<TaskItemRowProps> = ({
+  queuedCompletion, onQueueCompletion, selectionMode = false, bulkSelected = false, onBulkSelect,
   task,
   allTasks,
   level,
@@ -102,7 +107,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   const [animPhase, setAnimPhase] = useState<'idle' | 'exiting'>('idle');
 
   const isPendingConfirm =
-    pendingConfirmTaskId !== undefined ? pendingConfirmTaskId === task.id : localPendingConfirm;
+    queuedCompletion !== undefined ? queuedCompletion : pendingConfirmTaskId !== undefined ? pendingConfirmTaskId === task.id : localPendingConfirm;
   const leaveTimerRef = useRef<any>(null);
 
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -116,14 +121,14 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   const progress = calculateProgress(allTasks, task.id);
 
   // Descendants count for parent completion prompt
-  const incompleteDescendants = getDescendantTasks(allTasks, task.id).filter(
+  const incompleteDescendants = onQueueCompletion ? [] : getDescendantTasks(allTasks, task.id).filter(
     (t) => !t.deleted_at && t.status === 'open'
   );
   const incompleteDescendantsCount = incompleteDescendants.length;
 
   // Check if completing this task will auto-close ancestors
   const willCloseAncestors: string[] = [];
-  if (task.parent_id) {
+  if (task.parent_id && !onQueueCompletion) {
     let currParentId: string | null = task.parent_id;
     const simulatedDone = new Set<string>([task.id, ...incompleteDescendants.map((d) => d.id)]);
     while (currParentId) {
@@ -145,7 +150,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
 
   // Esc key cancels pending confirmation
   useEffect(() => {
-    if (!isPendingConfirm) return;
+    if (!isPendingConfirm || onQueueCompletion) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         handleCancelPending();
@@ -270,37 +275,11 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   }, []);
 
   const handleConfirmComplete = () => {
-    if (animPhase !== 'idle') return;
-    const willStayInWorkspace =
-      showCompleted ||
-      !willCompletionArchiveTree(allTasks, task.id);
-
-    if (willStayInWorkspace || reducedMotion) {
-      if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
-      else setLocalPendingConfirm(false);
-      onToggleComplete(task);
-      return;
-    }
-
-    setAnimPhase('exiting');
-    // Primary exit animation duration: 200ms (180ms ~ 240ms range)
-    leaveTimerRef.current = setTimeout(() => {
-      onToggleComplete(task);
-      if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
-      else setLocalPendingConfirm(false);
-      setAnimPhase('idle');
-    }, 200);
+    if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
+    else setLocalPendingConfirm(false);
+    onToggleComplete(task);
   };
-
-  const handleArchive = () => {
-    if (!onArchiveCompleted || animPhase !== 'idle') return;
-    if (reducedMotion) {
-      onArchiveCompleted(task);
-      return;
-    }
-    setAnimPhase('exiting');
-    leaveTimerRef.current = setTimeout(() => onArchiveCompleted(task), 200);
-  };
+  const handleArchive = () => { onArchiveCompleted?.(task); };
 
   const handleCancelPending = () => {
     if (onSetPendingConfirmTaskId) {
@@ -324,9 +303,9 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={() => onSelect(task)}
+      onClick={(e) => selectionMode ? !isContextOnly && onBulkSelect?.(task.id, e.shiftKey) : onSelect(task)}
       className={`group relative flex items-center justify-between py-2 px-3 rounded-lg text-sm border border-transparent cursor-pointer ${
-        isSelected
+        (selectionMode ? bulkSelected : isSelected)
           ? 'bg-blue-50/70 border-blue-200/80 shadow-xs'
           : isContextOnly
           ? 'opacity-60 bg-slate-50/40 hover:opacity-100'
@@ -390,7 +369,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
 
         {/* Dedicated Drag Handle */}
         <div
-          draggable
+          draggable={!selectionMode}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onClick={(e) => e.stopPropagation()}
@@ -400,10 +379,14 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
           <GripVertical className="w-3.5 h-3.5" />
         </div>
 
+        {selectionMode && <input type="checkbox" aria-label={`选择 ${task.title}`} checked={bulkSelected} disabled={isContextOnly}
+          onClick={e => { e.stopPropagation(); if (!isContextOnly) onBulkSelect?.(task.id, e.shiftKey); }} onChange={() => {}} className="w-4 h-4 accent-blue-600" />}
         {/* Complete Checkbox with 2-step confirmation preview */}
         <button
+          disabled={selectionMode}
           onClick={(e) => {
             e.stopPropagation();
+            if (onQueueCompletion && !isDone) { onQueueCompletion(task.id); return; }
             if (isDone) {
               onToggleComplete(task);
             } else {
@@ -427,7 +410,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
         </button>
 
         {/* COMPACT Inline Confirmation Bar: Located IMMEDIATELY next to checkbox (<= 160px pointer distance) */}
-        {isPendingConfirm && (
+        {isPendingConfirm && !onQueueCompletion && (
           <div
             className="flex items-center gap-1.5 mr-2 bg-emerald-50/95 border border-emerald-300 px-2 py-0.5 rounded-lg shadow-xs z-20 animate-in fade-in duration-100 flex-shrink-0"
             onClick={(e) => e.stopPropagation()}
@@ -480,7 +463,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
           >
             <span
               className={`strikethrough-animate font-medium text-sm transition-colors truncate ${
-                isDone || isPendingConfirm ? 'is-done text-slate-400' : isContextOnly ? 'text-slate-500' : 'text-slate-800'
+                isDone ? 'is-done text-slate-400' : isContextOnly ? 'text-slate-500' : 'text-slate-800'
               }`}
             >
               {task.title}

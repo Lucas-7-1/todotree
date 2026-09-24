@@ -52,7 +52,7 @@ node bundle-singlefile.mjs
 然后在 Windows PowerShell 编译：
 
 ```powershell
-& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /out:TodoTree.exe /resource:dist\TodoTree_一键直达.html desktop-host\Program.cs
+& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /r:System.Web.Extensions.dll /out:TodoTree.exe /resource:dist\TodoTree_一键直达.html desktop-host\Program.cs desktop-host\DurableWorkspace.cs
 ```
 
 打包后用新版 EXE 验证本页行为。请勿仅替换源码就将旧 EXE 标为已更新。

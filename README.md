@@ -100,7 +100,7 @@ node bundle-singlefile.mjs
 ### 方式四：编译桌面宿主 EXE (Windows)
 使用 Windows 自带的 .NET Framework C# 编译器编译宿主程序：
 ```powershell
-& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /out:TodoTree.exe /resource:dist\TodoTree_一键直达.html desktop-host\Program.cs
+& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /r:System.Web.Extensions.dll /out:TodoTree.exe /resource:dist\TodoTree_一键直达.html desktop-host\Program.cs desktop-host\DurableWorkspace.cs
 ```
 
 ---
@@ -197,3 +197,7 @@ node tests/run_v1_3_tests.mjs
 ## 📄 授权与许可
 
 本项目采用 [MIT 许可证](LICENSE) 开源。
+
+## Persistence and multi-select update
+
+See [migration, recovery, batch operations and Windows validation](docs/persistence-and-bulk-operations.md). The new host requires `System.Web.Extensions.dll` and `desktop-host/DurableWorkspace.cs` when compiling. The previously tracked EXE and dist files are not this source revision; rebuild before distributing.

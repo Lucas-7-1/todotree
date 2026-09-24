@@ -316,4 +316,3 @@ export function isTaskVisibleInWorkspace(
   }
   return true;
 }
-

@@ -2,65 +2,17 @@ import { TaskNode } from '../../types/todo';
 import { TaskEvent, TaskEventType } from '../../types/ai';
 import { getAncestorNodes, getDescendantTasks } from '../treeOperations';
 
-const EVENTS_STORAGE_KEY = 'todotree_task_events_v1';
-let cachedEvents: TaskEvent[] | null = null;
-
-function generateEventId(): string {
-  return 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
-}
-
+import { loadWorkspace, commitWorkspace } from '../durableStore';
+function generateEventId(): string { return 'evt_' + crypto.randomUUID(); }
 export async function loadEventsFromStorage(): Promise<TaskEvent[]> {
-  if (cachedEvents) return cachedEvents;
-
-  // 1. Try fetching from desktop host /api/events
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 800);
-    const resp = await fetch('/api/events', { signal: controller.signal });
-    clearTimeout(timeout);
-    if (resp.ok) {
-      const data = await resp.json();
-      if (Array.isArray(data)) {
-        cachedEvents = data;
-        try {
-          localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(data));
-        } catch {}
-        return data;
-      }
-    }
-  } catch {
-    // Desktop API not reachable or timed out
-  }
-
-  // 2. Fallback to localStorage
-  try {
-    const local = localStorage.getItem(EVENTS_STORAGE_KEY);
-    if (local) {
-      const parsed = JSON.parse(local);
-      if (Array.isArray(parsed)) {
-        cachedEvents = parsed;
-        return parsed;
-      }
-    }
-  } catch {}
-
-  cachedEvents = [];
-  return [];
+  return (await loadWorkspace()).data.events;
 }
-
 export async function saveEventsToStorage(events: TaskEvent[]): Promise<void> {
-  cachedEvents = events;
-  try {
-    localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(events));
-  } catch {}
-
-  try {
-    fetch('/api/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(events),
-    }).catch(() => {});
-  } catch {}
+  // Legacy migration may append baseline events, but can never overwrite newer history.
+  await commitWorkspace(data => {
+    const known = new Set(data.events.map(e => e.event_id));
+    return { ...data, events: [...data.events, ...events.filter(e => !known.has(e.event_id))] };
+  });
 }
 
 export async function logTaskEvent(

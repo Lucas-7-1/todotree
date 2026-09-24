@@ -17,6 +17,10 @@ import {
   takeOverTabLock,
   SaveStatus,
 } from './services/storage';
+import { loadWorkspace, getPersistenceError, retryPendingSave, isDesktop, importFullBackup, WorkspaceSnapshot } from './services/durableStore';
+import { StorageRecovery } from './components/StorageRecovery';
+import { applyBulkAction, BulkAction } from './services/bulkTasks';
+import { animateArchivedRows } from './services/archiveAnimation';
 import { undoManager } from './services/undoManager';
 import { completeTaskBranch, archiveCompletedBranch, reopenTaskBranch, insertTaskNode } from './services/taskLifecycle';
 import {
@@ -53,13 +57,7 @@ import { CreateTaskModal } from './components/CreateTaskModal';
 import { CompletedDrawer } from './components/CompletedDrawer/CompletedDrawer';
 import { AuxiliaryPanel, AuxiliaryPanelType } from './components/AuxiliaryPanel/AuxiliaryPanel';
 import { ReportHistoryPanel } from './components/WorkReview/ReportHistoryPanel';
-import {
-  logTaskCompletion,
-  logTaskUncomplete,
-  logTaskCompletionsBatch,
-  logTaskUncompletionsBatch,
-  migrateLegacyCompletedTasks,
-} from './services/ai/eventLogger';
+
 import { SavedReport } from './types/ai';
 import {
   loadAISettings,
@@ -194,10 +192,16 @@ export const App: React.FC = () => {
 
   // Load review saved reports for history drawer
   useEffect(() => {
-    loadSavedReports().then(setReviewSavedReports);
+    loadSavedReports().then(setReviewSavedReports).catch(() => {});
   }, []);
 
   // Status & Lock
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const savingVersion = useRef(0);
+  const failedSaveRef = useRef<{ before: TaskNode[]; next: TaskNode[]; description: string; recordUndo: boolean } | null>(null);
+  const pendingNavigationGuard = useRef<null | (() => Promise<boolean>)>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [isTabOwner, setIsTabOwner] = useState(true);
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -256,7 +260,7 @@ export const App: React.FC = () => {
         reconnectTimeoutRef.current = null;
       }
       if (manual) {
-        loadTasksFromStorage().then(setTasks);
+        // Reconnection must not replace pending edits with an older disk snapshot.
         setToast({ id: 'conn-restored-' + Date.now(), type: 'info', title: '本地服务连接已恢复' });
       }
       return true;
@@ -316,95 +320,36 @@ export const App: React.FC = () => {
     }
   }, [isTerminalDisconnected, reconnectAttempt, serverHealth, currentView, tasks]);
 
-  // Load initial data and maintain robust desktop host heartbeat (NO close on pagehide!)
+  // Initialization is independent of heartbeat/disconnection renders.
   useEffect(() => {
-    loadTasksFromStorage().then((data) => {
-      let { updatedTasks, addedCount } = syncRecurringTasks(data);
-
-      // Historical Data Calibration (PRD Incremental v1.1 Section 3.9)
-      const calibratedKey = 'todotree_closure_calibrated_v1';
-      if (!localStorage.getItem(calibratedKey)) {
-        let hasCalibrated = false;
-        const nowStr = new Date().toISOString();
-        const clone = updatedTasks.map((t) => ({ ...t }));
-
-        // 1. If parent is done, but has active uncompleted children -> calibrate parent to open
-        for (const t of clone) {
-          if (t.status === 'done' && !t.deleted_at) {
-            const openChildren = clone.filter(
-              (c) => c.parent_id === t.id && !c.deleted_at && c.status === 'open'
-            );
-            if (openChildren.length > 0) {
-              t.status = 'open';
-              t.completed_at = null;
-              t.archived_at = null;
-              t.updated_at = nowStr;
-              hasCalibrated = true;
-            }
-          }
-        }
-
-        // 2. If parent is open, but all valid direct children are done -> calibrate parent to done
-        const openParents = clone.filter((t) => {
-          if (t.status !== 'open' || t.deleted_at) return false;
-          const validChildren = clone.filter((c) => c.parent_id === t.id && !c.deleted_at);
-          return validChildren.length > 0 && validChildren.every((c) => c.status === 'done');
-        });
-
-        for (const p of openParents) {
-          p.status = 'done';
-          const validChildren = clone.filter(
-            (c) => c.parent_id === p.id && !c.deleted_at && c.completed_at
-          );
-          p.completed_at =
-            validChildren.length > 0
-              ? validChildren[validChildren.length - 1].completed_at
-              : nowStr;
-          p.updated_at = nowStr;
-          hasCalibrated = true;
-        }
-
-        if (hasCalibrated) {
-          updatedTasks = clone;
-          addedCount++;
-        }
-        localStorage.setItem(calibratedKey, 'true');
-      }
-
+    let alive = true;
+    loadWorkspace().then(async state => {
+      const { updatedTasks, addedCount } = syncRecurringTasks(state.data.tasks);
+      if (addedCount) await saveTasksToStorage(updatedTasks);
+      if (!alive) return;
+      tasksRef.current = updatedTasks;
       setTasks(updatedTasks);
-      if (addedCount > 0) {
-        saveTasksToStorage(updatedTasks).catch(console.error);
-      }
-    });
+      setSettings(previous => ({ ...previous, ...state.data.settings }));
+      setLoaded(true);
+      setStorageError(getPersistenceError());
+    }).catch(error => { if (alive) setStorageError(error.message || '无法读取数据'); });
+    const unlock = initTabLock(setIsTabOwner);
+    const onFailure = (event: Event) => setStorageError((event as CustomEvent).detail || '保存失败');
+    window.addEventListener('todotree:save-error', onFailure);
+    return () => { alive = false; unlock(); window.removeEventListener('todotree:save-error', onFailure); };
+  }, []);
 
-    const unlock = initTabLock((isOwner) => {
-      setIsTabOwner(isOwner);
-    });
-
-    // Initial health probe
+  useEffect(() => {
+    if (!isDesktop()) return;
     checkServerConnection(false);
-
-    // Regular heartbeat probe every 3000ms
-    const pingTimer = setInterval(() => {
-      if (!isUnloadingRef.current && !isServerDisconnected) {
-        checkServerConnection(false);
-      }
-    }, 3000);
-
-    return () => {
-      clearInterval(pingTimer);
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      unlock();
-    };
-  }, [checkServerConnection, isServerDisconnected]);
+    const timer = setInterval(() => checkServerConnection(false), 5000);
+    return () => { clearInterval(timer); if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current); };
+  }, [checkServerConnection]);
 
   // Save Guard: intercept beforeunload if save is currently in progress (PRD 10.3)
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      isUnloadingRef.current = true;
-      if (saveStatus === 'saving') {
+      if (saveStatus === 'saving' || storageError) {
         e.preventDefault();
         e.returnValue = '任务正在保存至本地硬盘，请稍候...';
         return '任务正在保存至本地硬盘，请稍候...';
@@ -412,7 +357,7 @@ export const App: React.FC = () => {
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [saveStatus]);
+  }, [saveStatus, storageError]);
 
   // F5 / Refresh key debounce and save guard
   useEffect(() => {
@@ -425,7 +370,7 @@ export const App: React.FC = () => {
           return;
         }
         lastF5Time = now;
-        if (saveStatus === 'saving') {
+        if (saveStatus === 'saving' || storageError) {
           e.preventDefault();
           if (
             window.confirm(
@@ -439,7 +384,7 @@ export const App: React.FC = () => {
     };
     window.addEventListener('keydown', handleF5KeyDown);
     return () => window.removeEventListener('keydown', handleF5KeyDown);
-  }, [saveStatus]);
+  }, [saveStatus, storageError]);
 
   // Update reduced motion DOM attribute
   useEffect(() => {
@@ -449,39 +394,49 @@ export const App: React.FC = () => {
     );
   }, [settings.reduced_motion]);
 
-  // Persist tasks helper
+  // Single serialized disk commit; only the newest save may update the status badge.
   const updateTasksWithSave = useCallback(
-    (newTasks: TaskNode[], actionDesc: string, recordUndo = true) => {
-      if (recordUndo) {
-        undoManager.pushStep(actionDesc, tasks);
-        setUndoStackVersion((v) => v + 1);
-      }
-      tasksRef.current = newTasks;
-      setTasks(newTasks);
+    async (newTasks: TaskNode[], actionDesc: string, recordUndo = true, confirmedOnly = false): Promise<boolean> => {
+      if (getPersistenceError()) { setStorageError(getPersistenceError()); return false; }
+      const previous = tasksRef.current;
+      const version = ++savingVersion.current;
+      if (!confirmedOnly) { tasksRef.current = newTasks; setTasks(newTasks); }
       setSaveStatus('saving');
-      saveTasksToStorage(newTasks)
-        .then(() => {
-          setSaveStatus('saved');
-        })
-        .catch(() => {
-          setSaveStatus('error');
-        });
-    },
-    [tasks]
+      try {
+        await saveTasksToStorage(newTasks, /永久|清空|导入|重置/.test(actionDesc));
+        if (confirmedOnly) {
+          const oldById = new Map(previous.map(t => [t.id, t]));
+          animateArchivedRows(new Set(newTasks.filter(t => t.archived_at && !oldById.get(t.id)?.archived_at).map(t => t.id)), document.documentElement.dataset.reducedMotion === 'true');
+          tasksRef.current = newTasks; setTasks(newTasks);
+        }
+        if (recordUndo) { undoManager.pushTaskDiff(actionDesc, previous, newTasks); setUndoStackVersion(v => v + 1); }
+        if (version === savingVersion.current) setSaveStatus('saved');
+        return true;
+      } catch (error) {
+        if (!failedSaveRef.current) failedSaveRef.current = { before: previous, next: newTasks, description: actionDesc, recordUndo };
+        if (version === savingVersion.current) setSaveStatus('error');
+        setStorageError((error as Error).message);
+        return false;
+      }
+    }, []
   );
 
-  const logCompletionTransitions = (before: TaskNode[], after: TaskNode[]) => {
-    const previous = new Map(before.map(t => [t.id, t]));
-    const reopened: string[] = [];
-    const completed: TaskNode[] = [];
-    for (const task of after) {
-      const old = previous.get(task.id);
-      if (!old || task.deleted_at) continue;
-      if (old.status === 'done' && task.status === 'open') reopened.push(task.id);
-      if (old.status === 'open' && task.status === 'done') completed.push(task);
-    }
-    if (reopened.length) logTaskUncompletionsBatch(reopened, before).catch(console.error);
-    if (completed.length) logTaskCompletionsBatch(completed, after, {}).catch(console.error);
+  const handleBulkAction = async (ids: string[], action: BulkAction): Promise<boolean> => {
+    if (batchBusy || saveStatus === 'saving' || !loaded || !isTabOwner || storageError) return false;
+    const before = tasksRef.current;
+    let next: TaskNode[];
+    try { next = applyBulkAction(before, ids, action).tasks; }
+    catch (error) { setToast({ id: 'batch-error', type: 'error', title: (error as Error).message }); return false; }
+    if (next === before) return true;
+    if (action.type === 'complete') next = syncRecurringTasks(next).updatedTasks;
+    setBatchBusy(true);
+    try {
+      const success = await updateTasksWithSave(next, '批量任务操作', true, true);
+      if (!success) return false;
+      closeAuxiliaryPanel();
+      setToast({ id: 'batch-' + Date.now(), type: 'complete', title: '批量操作已保存', canUndo: true, onUndo: () => handleUndo() });
+      return true;
+    } finally { setBatchBusy(false); }
   };
 
   // Undo / Redo handlers
@@ -489,7 +444,6 @@ export const App: React.FC = () => {
     const currentTasks = tasksRef.current;
     const res = undoManager.undo(currentTasks);
     if (res) {
-      logCompletionTransitions(currentTasks, res.newTasks);
 
       updateTasksWithSave(res.newTasks, `撤销: ${res.description}`, false);
       setUndoStackVersion((v) => v + 1);
@@ -505,7 +459,6 @@ export const App: React.FC = () => {
     const currentTasks = tasksRef.current;
     const res = undoManager.redo(currentTasks);
     if (res) {
-      logCompletionTransitions(currentTasks, res.newTasks);
 
       updateTasksWithSave(res.newTasks, `重做: ${res.description}`, false);
       setUndoStackVersion((v) => v + 1);
@@ -520,11 +473,11 @@ export const App: React.FC = () => {
   // Global Keyboard Shortcuts (Ctrl+N, Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.isComposing) return;
+      if (e.isComposing || saveStatus === 'saving' || storageError || !loaded) return;
       const activeEl = document.activeElement;
       const isInput =
         activeEl &&
-        (activeEl.tagName === 'INPUT' ||
+        ((activeEl.tagName === 'INPUT' && (activeEl as HTMLInputElement).type !== 'checkbox') ||
           activeEl.tagName === 'TEXTAREA' ||
           (activeEl as HTMLElement).isContentEditable);
 
@@ -586,7 +539,7 @@ export const App: React.FC = () => {
     isCompletedDrawerOpen,
     parentCompleteTarget,
     handleUndo,
-    handleRedo,
+    handleRedo, saveStatus, storageError, loaded,
   ]);
 
   const handleTakeOverLock = () => {
@@ -660,9 +613,6 @@ export const App: React.FC = () => {
       setToast({ id: 'add-error-' + Date.now(), type: 'error', title: (error as Error).message });
       return null;
     }
-    const nextById = new Map(nextTasks.map(t => [t.id, t]));
-    const reopenedIds = currentTasks.filter(t => t.status === 'done' && nextById.get(t.id)?.status === 'open').map(t => t.id);
-    if (reopenedIds.length) logTaskUncompletionsBatch(reopenedIds, currentTasks).catch(console.error);
     undoManager.pushTaskDiff(`添加任务「${newTask.title}」`, currentTasks, nextTasks);
     setUndoStackVersion((v) => v + 1);
     updateTasksWithSave(nextTasks, `添加任务「${newTask.title}」`, false);
@@ -675,7 +625,8 @@ export const App: React.FC = () => {
   };
 
   // All completion entry points share the same subtree/ancestor transition.
-  const handleToggleComplete = (task: TaskNode, outcomeNote?: string) => {
+  const handleToggleComplete = async (task: TaskNode, outcomeNote?: string) => {
+    if (saveStatus === 'saving' || storageError) return;
     const currentTasks = tasksRef.current;
     const current = currentTasks.find(t => t.id === task.id && !t.deleted_at);
     if (!current) return;
@@ -690,10 +641,7 @@ export const App: React.FC = () => {
     const actionDesc = result.autoClosedIds.length
       ? `已完成「${current.title}」，并闭环 ${result.autoClosedIds.length} 个上级任务`
       : `已完成「${current.title}」`;
-    undoManager.pushTaskDiff(actionDesc, currentTasks, updatedTasks);
-    setUndoStackVersion(v => v + 1);
-    logTaskCompletionsBatch(result.completedTasks, currentTasks, { [current.id]: outcomeNote ?? current.outcome_note ?? '' }).catch(console.error);
-    updateTasksWithSave(updatedTasks, actionDesc, false);
+    if (!(await updateTasksWithSave(updatedTasks, actionDesc, true, true))) return;
     closeAuxiliaryPanel();
     setToast({
       id: 'complete-' + Date.now(), type: 'complete', title: actionDesc,
@@ -702,7 +650,7 @@ export const App: React.FC = () => {
     });
   };
 
-  const handleArchiveCompleted = (task: TaskNode) => {
+  const handleArchiveCompleted = async (task: TaskNode) => {
     const currentTasks = tasksRef.current;
     const result = archiveCompletedBranch(currentTasks, task.id);
     if (result.error) {
@@ -712,9 +660,7 @@ export const App: React.FC = () => {
     const nextTasks = result.tasks;
     if (nextTasks === currentTasks || !result.newlyArchivedIds.length) return;
     const description = `已归档「${task.title}」`;
-    undoManager.pushTaskDiff(description, currentTasks, nextTasks);
-    setUndoStackVersion(v => v + 1);
-    updateTasksWithSave(nextTasks, description, false);
+    if (!(await updateTasksWithSave(nextTasks, description, true, true))) return;
     closeAuxiliaryPanel();
     setToast({
       id: 'archive-' + Date.now(), type: 'complete', title: description,
@@ -730,7 +676,7 @@ export const App: React.FC = () => {
   };
 
   // Restore target/ancestors together; archived siblings keep their history.
-  const handleRestoreTask = (target: TaskNode | string, includeDescendants = false) => {
+  const handleRestoreTask = async (target: TaskNode | string, includeDescendants = false) => {
     const currentTasks = tasksRef.current;
     const id = typeof target === 'string' ? target : target.id;
     const task = currentTasks.find(t => t.id === id && !t.deleted_at);
@@ -740,10 +686,7 @@ export const App: React.FC = () => {
     const reopenedIds = nextTasks.filter(t => t.status === 'open' && previous.get(t.id)?.status === 'done').map(t => t.id);
     if (!reopenedIds.length) return;
     const description = `恢复「${task.title}」`;
-    undoManager.pushTaskDiff(description, currentTasks, nextTasks);
-    setUndoStackVersion(v => v + 1);
-    logTaskUncompletionsBatch(reopenedIds, currentTasks).catch(console.error);
-    updateTasksWithSave(nextTasks, description, false);
+    if (!(await updateTasksWithSave(nextTasks, description, true, true))) return;
     setToast({ id: 'restore-' + Date.now(), type: 'info', title: description, canUndo: true, onUndo: handleUndo });
   };
 
@@ -1094,7 +1037,6 @@ export const App: React.FC = () => {
 
     if (dragged.status === 'open' && newParentId) {
       nextTasks = reopenTaskBranch(nextTasks, newParentId);
-      logCompletionTransitions(tasks, nextTasks);
     }
     undoManager.pushTaskDiff(`移动节点「${dragged.title}」`, tasks, nextTasks);
     setUndoStackVersion(v => v + 1);
@@ -1308,7 +1250,10 @@ export const App: React.FC = () => {
   const handlePermanentlyDeleteSingleTask = (taskId: string) => {
     const target = tasks.find((t) => t.id === taskId);
     if (!target) return;
-    const nextTasks = tasks.filter((t) => t.id !== taskId);
+    const removed = new Set([taskId]);
+    let expanded = true;
+    while (expanded) { expanded = false; for (const t of tasks) if (t.parent_id && removed.has(t.parent_id) && !removed.has(t.id)) { removed.add(t.id); expanded = true; } }
+    const nextTasks = tasks.filter(t => !removed.has(t.id));
     updateTasksWithSave(nextTasks, `永久删除「${target.title}」`, false);
     setToast({
       id: 'perm-del-task-' + Date.now(),
@@ -1329,18 +1274,18 @@ export const App: React.FC = () => {
     });
   };
 
-  // 16. Import Tasks Backup
-  const handleImportTasks = (newTasks: TaskNode[], newSettings?: AppSettings) => {
-    if (newSettings) {
-      setSettings(newSettings);
-      saveSettingsToStorage(newSettings);
-    }
-    updateTasksWithSave(newTasks, `整库导入任务数据`, false);
-    setToast({
-      id: 'import-' + Date.now(),
-      type: 'complete',
-      title: `成功导入 ${newTasks.length} 项任务！`,
-    });
+  // Both legacy and complete backups commit through one versioned transaction.
+  const handleImportTasks = async (newTasks: TaskNode[], newSettings?: AppSettings, full?: WorkspaceSnapshot) => {
+    try {
+      const current = await loadWorkspace();
+      const restored = await importFullBackup(full || { ...current, data: { ...current.data, tasks: newTasks, settings: newSettings || current.data.settings } });
+      tasksRef.current = restored.data.tasks; setTasks(restored.data.tasks);
+      setSettings(previous => ({ ...previous, ...restored.data.settings }));
+      setReviewSavedReports(restored.data.reports);
+      undoManager.clear(); setUndoStackVersion(v => v + 1);
+      setSaveStatus('saved');
+      setToast({ id: 'import-' + Date.now(), type: 'complete', title: `成功导入 ${newTasks.length} 项任务` });
+    } catch (error) { setStorageError((error as Error).message); throw error; }
   };
 
   // 17. Reset Seed Data
@@ -1379,7 +1324,8 @@ export const App: React.FC = () => {
       {/* 1. Left Sidebar */}
       <Sidebar
         currentView={currentView}
-        onViewChange={(view) => {
+        onViewChange={async (view) => {
+            if (pendingNavigationGuard.current && !(await pendingNavigationGuard.current())) return;
           if (view === 'completed') {
             setIsCompletedDrawerOpen(true);
           } else {
@@ -1447,6 +1393,18 @@ export const App: React.FC = () => {
           </div>
         )}
 
+        {storageError && <StorageRecovery message={storageError} onRetry={async () => {
+          const state = await retryPendingSave();
+          const failed = failedSaveRef.current;
+          if (failed?.recordUndo && JSON.stringify(failed.next) === JSON.stringify(state.data.tasks)) {
+            undoManager.pushTaskDiff(failed.description, failed.before, state.data.tasks); setUndoStackVersion(v => v + 1);
+          }
+          failedSaveRef.current = null;
+          tasksRef.current = state.data.tasks; setTasks(state.data.tasks);
+          setSettings(previous => ({ ...previous, ...state.data.settings }));
+          setLoaded(true); setStorageError(getPersistenceError()); setSaveStatus('saved');
+        }} />}
+        {(!loaded || batchBusy || storageError || saveStatus === 'saving') && <div className="absolute inset-0 z-30 bg-white/40" aria-label="正在保护数据" />}
         {/* Header (Hidden in review view as it has its own dedicated toolbar) */}
         {currentView !== 'review' && (
           <Header
@@ -1480,6 +1438,8 @@ export const App: React.FC = () => {
             <div className="flex-1 flex flex-col min-w-0 h-full">
               <TaskTree
                 tasks={tasks}
+                onBulkAction={handleBulkAction}
+                onPendingGuardChange={guard => { pendingNavigationGuard.current = guard; }}
                 selectedTaskId={selectedTaskId}
                 onSelectTask={handleSelectTask}
                 onToggleComplete={handleToggleComplete}
@@ -1563,7 +1523,7 @@ export const App: React.FC = () => {
                   show_completed: !settings.show_completed,
                 };
                 setSettings(updated);
-                saveSettingsToStorage(updated);
+                saveSettingsToStorage(updated).catch(error => setStorageError(error.message));
               }}
               onOpenCompletedDrawer={() => openAuxiliaryPanel('completed')}
             />
@@ -1602,7 +1562,7 @@ export const App: React.FC = () => {
                 handleSelectTask(tasks.find((t) => t.id === taskId) || null);
               }}
               onOpenHistory={() => {
-                loadSavedReports().then(setReviewSavedReports);
+                loadSavedReports().then(setReviewSavedReports).catch(() => {});
                 openAuxiliaryPanel('report_history');
               }}
               activeReportFromProps={reviewActiveReport}
@@ -1721,7 +1681,7 @@ export const App: React.FC = () => {
         settings={settings}
         onUpdateSettings={(newSettings) => {
           setSettings(newSettings);
-          saveSettingsToStorage(newSettings);
+          saveSettingsToStorage(newSettings).catch(error => setStorageError(error.message));
         }}
         tasks={tasks}
         onImportTasks={handleImportTasks}

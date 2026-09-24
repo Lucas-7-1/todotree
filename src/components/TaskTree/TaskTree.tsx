@@ -1,3 +1,4 @@
+import { applyBulkAction, BulkAction } from '../../services/bulkTasks';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   TaskNode,
@@ -40,6 +41,8 @@ import {
 
 interface TaskTreeProps {
   tasks: TaskNode[];
+  onBulkAction?: (ids: string[], action: BulkAction) => Promise<boolean>;
+  onPendingGuardChange?: (guard: (() => Promise<boolean>) | null) => void;
   selectedTaskId: string | null;
   onSelectTask: (task: TaskNode) => void;
   onToggleComplete: (task: TaskNode, outcomeNote?: string) => void;
@@ -67,7 +70,7 @@ interface TaskTreeProps {
 }
 
 export const TaskTree: React.FC<TaskTreeProps> = ({
-  tasks,
+  tasks, onBulkAction, onPendingGuardChange,
   selectedTaskId,
   onSelectTask,
   onToggleComplete,
@@ -94,6 +97,17 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
   isQuadrantQuickOpen = false,
 }) => {
   const [pendingConfirmTaskId, setPendingConfirmTaskId] = useState<string | null>(null);
+
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [batchDue, setBatchDue] = useState('');
+  const [leavePrompt, setLeavePrompt] = useState(false);
+  const leaveResolver = useRef<((value: boolean) => void) | null>(null);
+  const anchor = useRef<string | null>(null);
+  const treeContainer = useRef<HTMLDivElement>(null);
+  const [actionPreview, setActionPreview] = useState<BulkAction | null>(null);
 
   // View Mode state (PRD v1.3 Section 12.1)
   const [viewMode, setViewMode] = useState<TaskViewMode>(() => {
@@ -162,6 +176,82 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
   const filterResult = useMemo(() => {
     return applyTaskFilters(tasks, filterState, todayStr, new Date(), visibleWorkspaceIds);
   }, [tasks, filterState, todayStr, visibleWorkspaceIds]);
+
+  const selectableIds = useMemo(() => (filterActive ? filterResult.matchedTasks : visibleWorkspaceTasks).map(t => t.id), [filterActive, filterResult, visibleWorkspaceTasks]);
+  const filterKey = JSON.stringify(filterState);
+  useEffect(() => {
+    if (selectedIds.size) onShowErrorToast('筛选条件已变更，已清空批量选择');
+    setSelectedIds(new Set()); anchor.current = null;
+  }, [filterKey]);
+  useEffect(() => {
+    const available = new Set(tasks.filter(t => !t.deleted_at && !t.archived_at).map(t => t.id));
+    setSelectedIds(previous => new Set([...previous].filter(id => available.has(id))));
+    setPendingIds(previous => new Set([...previous].filter(id => available.has(id) && tasks.find(t => t.id === id)?.status === 'open')));
+  }, [tasks]);
+  const toggleQueued = (id: string) => {
+    if (busy) return;
+    onCloseCompletedDrawer?.();
+    setPendingIds(previous => { const next = new Set(previous); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  };
+  const toggleSelected = (id: string, range: boolean) => {
+    const visibleOrder = Array.from(treeContainer.current?.querySelectorAll<HTMLElement>('[data-task-id]') || []).map(el => el.dataset.taskId!).filter(key => selectableIds.includes(key));
+    setSelectedIds(previous => {
+      const next = new Set(previous);
+      if (range && anchor.current && visibleOrder.includes(anchor.current) && visibleOrder.includes(id)) {
+        const a = visibleOrder.indexOf(anchor.current), b = visibleOrder.indexOf(id);
+        visibleOrder.slice(Math.min(a,b), Math.max(a,b)+1).forEach(key => next.add(key));
+      } else { next.has(id) ? next.delete(id) : next.add(id); }
+      return next;
+    });
+    if (!range) anchor.current = id;
+  };
+  const perform = async (ids: Set<string>, action: BulkAction): Promise<boolean> => {
+    if (!onBulkAction || busy || !ids.size) return false;
+    setBusy(true);
+    try {
+      const success = await onBulkAction([...ids], action);
+      if (success) { setPendingIds(new Set()); setSelectedIds(new Set()); setActionPreview(null); }
+      return success;
+    } catch (error) { onShowErrorToast((error as Error).message); return false; }
+    finally { setBusy(false); }
+  };
+  const preview = useMemo(() => {
+    try { return applyBulkAction(tasks, [...(actionPreview ? selectedIds : pendingIds)], actionPreview || { type: 'complete' }); }
+    catch { return null; }
+  }, [tasks, actionPreview, selectedIds, pendingIds]);
+  const canArchive = useMemo(() => {
+    if (!selectedIds.size) return false;
+    try { applyBulkAction(tasks, [...selectedIds], { type: 'archive' }); return true; } catch { return false; }
+  }, [tasks, selectedIds]);
+  useEffect(() => {
+    onPendingGuardChange?.(() => pendingIds.size ? new Promise<boolean>(resolve => { leaveResolver.current = resolve; setLeavePrompt(true); }) : Promise.resolve(true));
+    return () => onPendingGuardChange?.(null);
+  }, [pendingIds, onPendingGuardChange]);
+  useEffect(() => {
+    if (!pendingIds.size) return;
+    const guard = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+  }, [pendingIds]);
+  useEffect(() => {
+    if (!selectionMode) return;
+    const keyboard = (e: KeyboardEvent) => {
+      if (e.isComposing || (e.target as HTMLElement)?.closest?.('input:not([type=checkbox]), textarea, [contenteditable="true"]')) return;
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !e.repeat) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (selectedIds.size) setActionPreview({ type: 'delete' });
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault(); setSelectedIds(new Set(selectableIds));
+      } else if (e.key === 'Escape') { setSelectedIds(new Set()); setSelectionMode(false); setActionPreview(null); }
+    };
+    window.addEventListener('keydown', keyboard, true);
+    return () => window.removeEventListener('keydown', keyboard, true);
+  }, [selectionMode, selectedIds, selectableIds]);
+  const batchRowProps = (task: TaskNode) => ({
+    queuedCompletion: onBulkAction ? pendingIds.has(task.id) : undefined,
+    onQueueCompletion: onBulkAction ? toggleQueued : undefined,
+    selectionMode, bulkSelected: selectedIds.has(task.id), onBulkSelect: toggleSelected,
+  });
 
   // When searching, auto-expand necessary ancestors
   useEffect(() => {
@@ -358,6 +448,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
       return (
         <React.Fragment key={task.id}>
           <TaskItemRow
+            {...batchRowProps(task)}
             task={task}
             allTasks={tasks}
             level={level}
@@ -460,7 +551,8 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
                     </div>
                   )}
                   <TaskItemRow
-                    task={task}
+                    {...batchRowProps(task)}
+            task={task}
                     allTasks={tasks}
                     level={1}
                     hasChildren={inlineDraft?.parentId === task.id}
@@ -550,7 +642,8 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
                       </div>
                     )}
                     <TaskItemRow
-                      task={task}
+                      {...batchRowProps(task)}
+            task={task}
                       allTasks={tasks}
                       level={1}
                       hasChildren={inlineDraft?.parentId === task.id}
@@ -686,7 +779,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
   );
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-white select-none overflow-hidden relative">
+    <div ref={treeContainer} className="flex-1 flex flex-col h-full bg-white select-none overflow-hidden relative">
       {/* 1. Composite Task Filter Bar (PRD Section 1) */}
       <TaskFilterBar
         filterState={filterState}
@@ -709,6 +802,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
       {/* 2. Secondary Sub-Toolbar */}
       <div className="px-8 py-2.5 flex items-center justify-between border-b border-slate-100 bg-slate-50/30">
         <div className="flex items-center gap-4">
+          {onBulkAction && <button className="text-xs border rounded-lg px-3 py-1.5" disabled={busy || pendingIds.size > 0} onClick={() => { setSelectionMode(!selectionMode); setSelectedIds(new Set()); setActionPreview(null); }}>{selectionMode ? '退出多选' : '多选'}</button>}
           {/* View Mode Selector Dropdown */}
           <div className="relative">
             <button
@@ -849,6 +943,41 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
           ? renderListView()
           : renderProjectGroupView()}
       </div>
+
+      {(pendingIds.size > 0 || selectionMode) && <div className="border-t bg-white p-3 flex gap-3 flex-wrap items-center text-xs shadow-lg z-20" role="toolbar" aria-label="批量任务操作">
+        {selectionMode ? <>
+          <strong>已选 {selectedIds.size} 项</strong>
+          <button onClick={() => setSelectedIds(new Set(selectableIds))}>全选当前结果 ({selectableIds.length})</button>
+          <button onClick={() => setSelectedIds(new Set())}>取消全选</button>
+          <button disabled={!selectedIds.size || busy} onClick={() => setActionPreview({ type: 'complete' })}>批量完成</button>
+          <button disabled={!canArchive || busy} title={!canArchive ? '请选择全部已完成的任务及子树' : ''} onClick={() => perform(selectedIds, { type: 'archive' })}>批量搞定</button>
+          <select aria-label="批量设置优先级" value="" disabled={!selectedIds.size || busy} onChange={e => perform(selectedIds, { type: 'quadrant', value: e.target.value === 'none' ? null : e.target.value as QuadrantType })}>
+            <option value="" disabled>设置优先级</option><option value="Q1">重要且紧急</option><option value="Q2">重要不紧急</option><option value="Q3">紧急不重要</option><option value="Q4">不重要不紧急</option><option value="none">未分类</option>
+          </select>
+          <input aria-label="批量截止日期" type="date" value={batchDue} onChange={e => setBatchDue(e.target.value)} />
+          <button disabled={!selectedIds.size || !batchDue || busy} onClick={() => perform(selectedIds, { type: 'due', value: batchDue })}>设置日期</button>
+          <button disabled={!selectedIds.size || busy} onClick={() => perform(selectedIds, { type: 'due', value: null })}>清除日期</button>
+          <button disabled={!selectedIds.size || busy} onClick={() => perform(selectedIds, { type: 'today', value: getLocalDateString() })}>加入今天</button>
+          <button disabled={!selectedIds.size || busy} onClick={() => perform(selectedIds, { type: 'today', value: null })}>移出今天</button>
+          <button disabled={!selectedIds.size || busy} className="text-red-600" onClick={() => setActionPreview({ type: 'delete' })}>移入回收站</button>
+        </> : <>
+          <strong>待确认完成 {pendingIds.size} 项</strong>
+          <span>将修改 {preview?.changedCount || 0} 项，含自动完成上级 {preview?.autoCompletedCount || 0} 项；筛选外 { [...pendingIds].filter(id => !selectableIds.includes(id)).length } 项</span>
+          <button disabled={busy} className="bg-emerald-600 text-white px-3 py-2 rounded" onClick={() => perform(pendingIds, { type: 'complete' })}>{busy ? '保存中…' : '确认完成'}</button>
+          <button disabled={busy} onClick={() => setPendingIds(new Set())}>取消</button>
+        </>}
+      </div>}
+      {actionPreview && <div role="dialog" aria-label="确认批量操作" className="absolute inset-0 bg-white/95 z-40 flex flex-col items-center justify-center gap-4 text-sm">
+        <p>已选 {selectedIds.size} 项，本次将修改 {preview?.changedCount || 0} 项（含子任务及自动闭环上级），跳过已完成 {preview?.skippedCount || 0} 项。</p>
+        <button disabled={busy || !preview} className="bg-blue-600 text-white rounded px-4 py-2" onClick={() => perform(selectedIds, actionPreview)}>{actionPreview.type === 'delete' ? '确认移入回收站' : '确认批量完成'}</button>
+        <button onClick={() => setActionPreview(null)}>取消操作</button>
+      </div>}
+      {leavePrompt && <div role="dialog" aria-label="待确认任务" className="absolute inset-0 bg-white/95 z-50 flex flex-col items-center justify-center gap-4 text-sm">
+        <p>还有 {pendingIds.size} 项待确认完成。</p>
+        <button disabled={busy} onClick={async () => { if (await perform(pendingIds, { type: 'complete' })) { setLeavePrompt(false); leaveResolver.current?.(true); } }}>确认并离开</button>
+        <button disabled={busy} onClick={() => { setPendingIds(new Set()); setLeavePrompt(false); leaveResolver.current?.(true); }}>放弃并离开</button>
+        <button onClick={() => { setLeavePrompt(false); leaveResolver.current?.(false); }}>留在当前页</button>
+      </div>}
 
       {/* Floating Drag Hint Pill */}
       {draggingTaskId && (

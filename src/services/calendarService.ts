@@ -121,30 +121,16 @@ export function generateMonthGrid(year: number, month: number, todayStr: string)
  * the corresponding completion event is excluded from historical calendar counts.
  */
 export function filterEffectiveCompletionEvents(events: TaskEvent[]): TaskEvent[] {
-  // Map batchId -> uncompleted task ids
-  const uncompletedSet = new Set<string>();
-  for (const e of events) {
-    if (e.event_type === 'task_uncompleted') {
-      const key = `${e.task_id}_${e.operation_batch_id || ''}`;
-      uncompletedSet.add(key);
-      uncompletedSet.add(e.task_id); // In case batchId is missing
-    }
+  // Ledger order is authoritative: undo has its own operation id, not the completion id.
+  const stacks = new Map<string, TaskEvent[]>();
+  for (const event of events) {
+    const key = event.instance_id || event.task_id;
+    const stack = stacks.get(key) || [];
+    if (event.event_type === 'task_completed') stack.push(event);
+    else if (event.event_type === 'task_uncompleted') stack.pop();
+    stacks.set(key, stack);
   }
-
-  // Filter valid task_completed events
-  const validCompletions: TaskEvent[] = [];
-  for (const e of events) {
-    if (e.event_type === 'task_completed') {
-      const batchKey = `${e.task_id}_${e.operation_batch_id || ''}`;
-      // If directly uncompleted in same batch, skip
-      if (e.operation_batch_id && uncompletedSet.has(batchKey)) {
-        continue;
-      }
-      validCompletions.push(e);
-    }
-  }
-
-  return validCompletions;
+  return [...stacks.values()].flat();
 }
 
 /**

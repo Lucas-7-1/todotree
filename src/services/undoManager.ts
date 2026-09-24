@@ -190,6 +190,12 @@ class UndoManager {
         'sort_order',
         'deleted_at',
         'outcome_note',
+          'planned_date',
+          'deletion_batch_id',
+          'background_text',
+          'recurrence_rule',
+          'recurrence_rule_id',
+          'recurrence_period_key',
       ];
 
       for (const k of keysToCheck) {
@@ -246,6 +252,12 @@ class UndoManager {
           'sort_order',
           'deleted_at',
           'outcome_note',
+          'planned_date',
+          'deletion_batch_id',
+          'background_text',
+          'recurrence_rule',
+          'recurrence_rule_id',
+          'recurrence_period_key',
         ];
 
         for (const k of keysToCheck) {
