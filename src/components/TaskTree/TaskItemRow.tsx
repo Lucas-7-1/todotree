@@ -42,6 +42,7 @@ interface TaskItemRowProps {
   isSelected: boolean;
   onSelect: (task: TaskNode) => void;
   onToggleComplete: (task: TaskNode, outcomeNote?: string) => void;
+  onArchiveCompleted?: (task: TaskNode) => void;
   onUpdateTitle: (id: string, newTitle: string) => void;
   onUpdateQuadrant: (id: string, quadrant: QuadrantType) => void;
   onUpdateDue: (id: string, dueType: DueType, dateStr: string | null) => void;
@@ -71,6 +72,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   isSelected,
   onSelect,
   onToggleComplete,
+  onArchiveCompleted,
   onUpdateTitle,
   onUpdateQuadrant,
   onUpdateDue,
@@ -272,7 +274,8 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
       showCompleted ||
       (task.parent_id !== null &&
         hasActiveTaskAncestor(allTasks, task) &&
-        willCloseAncestors.length === 0);
+        willCloseAncestors.length === 0 &&
+        !allTasks.some(t => t.parent_id === task.id && !t.deleted_at));
 
     if (willStayInWorkspace || reducedMotion) {
       if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
@@ -282,22 +285,23 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
     }
 
     setAnimPhase('exiting');
-    // 400ms safety timeout fallback (PRD Section 2)
-    const safetyTimeout = setTimeout(() => {
-      onToggleComplete(task);
-      if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
-      else setLocalPendingConfirm(false);
-      setAnimPhase('idle');
-    }, 400);
-
     // Primary exit animation duration: 200ms (180ms ~ 240ms range)
     leaveTimerRef.current = setTimeout(() => {
-      clearTimeout(safetyTimeout);
       onToggleComplete(task);
       if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
       else setLocalPendingConfirm(false);
       setAnimPhase('idle');
     }, 200);
+  };
+
+  const handleArchive = () => {
+    if (!onArchiveCompleted || animPhase !== 'idle') return;
+    if (reducedMotion) {
+      onArchiveCompleted(task);
+      return;
+    }
+    setAnimPhase('exiting');
+    leaveTimerRef.current = setTimeout(() => onArchiveCompleted(task), 200);
   };
 
   const handleCancelPending = () => {
@@ -318,6 +322,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
 
   return (
     <div
+      data-task-id={task.id}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -561,19 +566,27 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
               </span>
             )}
 
-            {/* Quick in-place add subtask button on hover */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerAddChild();
-              }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all flex-shrink-0"
-              title="原位添加子任务"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
           </div>
         )}
+        {isDone && !task.archived_at && onArchiveCompleted && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); handleArchive(); }}
+            disabled={animPhase !== 'idle'}
+            title="归档此已完成任务，其他子任务继续保留"
+            className="flex-shrink-0 px-2 py-0.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-200"
+          >搞定</button>
+        )}
+        {/* Keep the action outside the truncated title, at every permitted depth. */}
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); triggerAddChild(); }}
+          className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded flex-shrink-0 focus-visible:ring-2 focus-visible:ring-blue-500"
+          title="原位添加子任务"
+          aria-label={`为「${task.title}」添加子任务`}
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Right Meta Columns */}

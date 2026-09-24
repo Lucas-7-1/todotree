@@ -4,7 +4,7 @@ import { CornerDownLeft, Plus, X } from 'lucide-react';
 interface InlineTaskDraftRowProps {
   parentId: string;
   level: number;
-  onSubmit: (parentId: string, title: string, continuous: boolean) => void;
+  onSubmit: (parentId: string, title: string, continuous: boolean) => boolean;
   onCancel: () => void;
 }
 
@@ -42,7 +42,11 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
     }
 
     isSavingRef.current = true;
-    onSubmit(parentId, trimmed, continuous);
+    if (!onSubmit(parentId, trimmed, continuous)) {
+      isSavingRef.current = false;
+      inputRef.current?.focus();
+      return;
+    }
     if (continuous) {
       setTitle('');
       isSavingRef.current = false;

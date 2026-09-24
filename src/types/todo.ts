@@ -25,6 +25,7 @@ export interface TaskNode {
   sort_order: number;
   status: TaskStatus;
   completed_at: string | null;
+  archived_at?: string | null; // Done items may remain struck through until explicitly/branch archived.
   due_type: DueType;
   due_date: string | null; // YYYY-MM-DD
   due_at: string | null;   // UTC ISO string

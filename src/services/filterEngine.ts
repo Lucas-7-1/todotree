@@ -109,10 +109,11 @@ export function matchTask(
   filter: TaskFilterState,
   todayStr: string = getLocalDateString(),
   now: Date = new Date(),
-  taskMap?: Map<string, TaskNode>
+  taskMap?: Map<string, TaskNode>,
+  includeCompleted = false
 ): { matched: boolean; snippet?: MatchSnippet } {
   // Only active uncompleted, non-deleted tasks
-  if (task.deleted_at || task.status === 'done') {
+  if (task.deleted_at || (!includeCompleted && task.status === 'done')) {
     return { matched: false };
   }
 
@@ -341,7 +342,8 @@ export function applyTaskFilters(
   tasks: TaskNode[],
   filter: TaskFilterState,
   todayStr: string = getLocalDateString(),
-  now: Date = new Date()
+  now: Date = new Date(),
+  candidateIds?: Set<string>
 ): FilterResult {
   const taskMap = new Map<string, TaskNode>();
   for (const t of tasks) {
@@ -354,7 +356,8 @@ export function applyTaskFilters(
   const contextAncestorIds = new Set<string>();
 
   for (const t of tasks) {
-    const result = matchTask(t, tasks, filter, todayStr, now, taskMap);
+    if (candidateIds && !candidateIds.has(t.id)) continue;
+    const result = matchTask(t, tasks, filter, todayStr, now, taskMap, !!candidateIds);
     if (result.matched) {
       matchedTasks.push(t);
       matchedIds.add(t.id);
@@ -366,7 +369,7 @@ export function applyTaskFilters(
       while (cur && cur.parent_id) {
         const a = taskMap.get(cur.parent_id);
         if (!a) break;
-        if (!a.deleted_at && a.status === 'open') {
+        if (!a.deleted_at && (a.status === 'open' || candidateIds?.has(a.id))) {
           contextAncestorIds.add(a.id);
         }
         cur = a;

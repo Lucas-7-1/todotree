@@ -1,0 +1,294 @@
+import test, { afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import React, { act, useState } from 'react';
+import { createRoot, Root } from 'react-dom/client';
+import { TaskTree } from '../src/components/TaskTree/TaskTree';
+import { completeTaskBranch, archiveCompletedBranch, reopenTaskBranch, insertTaskNode } from '../src/services/taskLifecycle';
+import { isTaskVisibleInWorkspace } from '../src/services/treeOperations';
+import { undoManager } from '../src/services/undoManager';
+import { validateImportJson, exportBackupData } from '../src/services/importExport';
+import { TaskNode } from '../src/types/todo';
+
+const timestamp = '2026-09-24T01:00:00.000Z';
+function task(id: string, parent_id: string | null = null, status: 'open' | 'done' = 'open'): TaskNode {
+  return { id, parent_id, title: id, status, root_bucket: parent_id ? null : 'categories', note: '', sort_order: 1,
+    completed_at: status === 'done' ? timestamp : null, due_type: 'none', due_date: null, due_at: null,
+    quadrant: null, planned_date: null, created_at: timestamp, updated_at: timestamp, deleted_at: null, deletion_batch_id: null };
+}
+const get = (tasks: TaskNode[], id: string) => tasks.find(t => t.id === id)!;
+const visible = (tasks: TaskNode[]) => tasks.filter(t => isTaskVisibleInWorkspace(tasks, t)).map(t => t.id);
+
+let root: Root | undefined;
+afterEach(async () => { if (root) { await act(() => root!.unmount()); root = undefined; } document.body.innerHTML = ''; localStorage.clear(); undoManager.clear(); });
+
+test('one completed child remains struck through under an open root category', () => {
+  const before = [task('root'), task('a', 'root'), task('b', 'root')];
+  const result = completeTaskBranch(before, 'a');
+  assert.equal(get(result.tasks, 'a').status, 'done');
+  assert.equal(get(result.tasks, 'a').archived_at, null);
+  assert.deepEqual(visible(result.tasks), ['root', 'a', 'b']);
+  assert.equal(result.completedTasks.length, 1);
+});
+
+test('搞定 archives only the completed child; last sibling still closes the whole branch', () => {
+  let tasks = completeTaskBranch([task('root'), task('a', 'root'), task('b', 'root')], 'a').tasks;
+  const completionTime = get(tasks, 'a').completed_at;
+  const beforeArchive = tasks;
+  tasks = archiveCompletedBranch(tasks, 'a');
+  assert.deepEqual(visible(tasks), ['root', 'b']);
+  assert.equal(get(tasks, 'a').completed_at, completionTime);
+  undoManager.pushTaskDiff('archive', beforeArchive, tasks);
+  assert.deepEqual(visible(undoManager.undo(tasks)!.newTasks), ['root', 'a', 'b']);
+  const result = completeTaskBranch(tasks, 'b');
+  assert.deepEqual(visible(result.tasks), []);
+  assert.deepEqual(result.completedTasks.map(t => t.id).sort(), ['b', 'root']);
+  assert.equal(get(result.tasks, 'a').completed_at, completionTime);
+});
+
+test('nested branch auto-closes without closing an unfinished sibling branch', () => {
+  const tasks = [task('root'), task('branch', 'root'), task('other', 'root'), task('a', 'branch'), task('b', 'branch')];
+  const first = completeTaskBranch(tasks, 'a').tasks;
+  assert.ok(visible(first).includes('a'));
+  const last = completeTaskBranch(first, 'b');
+  assert.deepEqual(last.autoClosedIds, ['branch']);
+  assert.deepEqual(visible(last.tasks), ['root', 'other']);
+  undoManager.pushTaskDiff('last child', first, last.tasks);
+  const restored = undoManager.undo(last.tasks)!.newTasks;
+  assert.deepEqual(visible(restored), ['root', 'branch', 'other', 'a', 'b']);
+  assert.equal(get(restored, 'a').status, 'done');
+  assert.equal(get(restored, 'b').status, 'open');
+  assert.deepEqual(visible(undoManager.redo(restored)!.newTasks), ['root', 'other']);
+});
+
+test('manual parent completion includes all descendants and propagates to ancestors', () => {
+  const tasks = [task('root'), task('branch', 'root'), task('a', 'branch'), task('grandchild', 'a')];
+  const result = completeTaskBranch(tasks, 'branch');
+  assert.ok(result.tasks.every(t => t.status === 'done' && t.archived_at));
+  assert.equal(result.completedTasks.length, 4);
+  assert.equal(completeTaskBranch(result.tasks, 'branch').completedTasks.length, 0);
+});
+
+test('adding under a completed nested node reopens the path and is atomically undoable', () => {
+  const before = completeTaskBranch([task('root'), task('child', 'root')], 'child').tasks;
+  const inserted = insertTaskNode(before, task('grandchild', 'child'));
+  assert.ok(inserted.every(t => t.status === 'open' && !t.archived_at));
+  undoManager.pushTaskDiff('insert', before, inserted);
+  const undone = undoManager.undo(inserted)!.newTasks;
+  assert.equal(get(undone, 'child').status, 'done');
+  assert.ok(get(undone, 'child').archived_at);
+  assert.ok(get(undone, 'grandchild').deleted_at);
+  assert.deepEqual(visible(undone), []);
+  assert.deepEqual(visible(undoManager.redo(undone)!.newTasks), ['root', 'child', 'grandchild']);
+});
+
+test('reopening an archived leaf opens ancestors; deleted children do not block closure', () => {
+  const removed = { ...task('deleted', 'root'), deleted_at: timestamp };
+  const done = completeTaskBranch([task('root'), task('child', 'root'), removed], 'child').tasks;
+  const reopened = reopenTaskBranch(done, 'child');
+  assert.equal(get(reopened, 'root').status, 'open');
+  assert.equal(get(reopened, 'child').archived_at, null);
+  assert.equal(get(reopened, 'deleted').deleted_at, timestamp);
+});
+
+test('five levels allowed; sixth level, missing parent and empty title rejected', () => {
+  let tasks = [task('level1')];
+  for (let depth = 2; depth <= 5; depth++) tasks = insertTaskNode(tasks, task(`level${depth}`, `level${depth - 1}`));
+  assert.throws(() => insertTaskNode(tasks, task('level6', 'level5')), /5 层/);
+  assert.throws(() => insertTaskNode(tasks, task('bad', 'missing')), /父任务/);
+  assert.throws(() => insertTaskNode(tasks, { ...task('blank'), title: '  ' }), /不能为空/);
+});
+
+test('archival metadata survives backup/import and cannot be archived while open', () => {
+  const tasks = completeTaskBranch([task('root'), task('a', 'root'), task('b', 'root')], 'a').tasks;
+  assert.equal(archiveCompletedBranch(tasks, 'b'), tasks);
+  const archived = archiveCompletedBranch(tasks, 'a');
+  const backup = exportBackupData(archived, { timezone: 'Asia/Shanghai', reduced_motion: true, show_completed: false, schema_version: 2 });
+  const imported = validateImportJson(backup);
+  assert.equal(imported.valid, true);
+  assert.deepEqual(visible(imported.tasks!), ['root', 'b']);
+});
+
+let latest: TaskNode[] = [];
+let nextId = 0;
+function Harness({ initial, reject = false }: { initial: TaskNode[]; reject?: boolean }) {
+  const [tasks, setTasks] = useState(initial);
+  latest = tasks;
+  const noop = () => {};
+  return <TaskTree tasks={tasks} selectedTaskId={null} onSelectTask={noop}
+    onToggleComplete={t => setTasks(prev => t.status === 'done' ? reopenTaskBranch(prev, t.id) : completeTaskBranch(prev, t.id).tasks)}
+    onArchiveCompleted={t => setTasks(prev => archiveCompletedBranch(prev, t.id))}
+    onUpdateTitle={noop} onUpdateQuadrant={noop} onUpdateDue={noop} onAddChild={noop}
+    onAddTaskInline={(parent, title) => {
+      if (reject) return null;
+      const newTask = { ...task(`new-${++nextId}`, parent), title };
+      setTasks(prev => insertTaskNode(prev, newTask));
+      return newTask;
+    }} onDeleteTask={noop} onDuplicateTask={noop} onTogglePlannedToday={noop} onMoveNode={noop}
+    onOpenCompletedDrawer={noop} reducedMotion searchQuery="" onShowErrorToast={noop} />;
+}
+async function mount(initial: TaskNode[], reject = false) {
+  const host = document.createElement('div'); document.body.append(host);
+  root = createRoot(host);
+  await act(() => root!.render(<Harness initial={initial} reject={reject} />));
+}
+async function click(el: Element | null) { assert.ok(el); await act(() => (el as HTMLElement).click()); }
+async function button(text: string) { const el = [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === text); await click(el!); }
+function row(id: string) { return document.querySelector(`[data-task-id="${id}"]`)!; }
+function draft() { return document.querySelector('input[placeholder^="输入子任务名称"]') as HTMLInputElement; }
+async function enter(value: string) {
+  const input = draft(); assert.ok(input, 'inline draft exists');
+  await act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+}
+
+test('actual tree UI creates children and grandchildren from zero children', async () => {
+  await mount([task('root'), task('child', 'root'), task('other', 'root')]);
+  await button('全部展开');
+  await click(row('child').querySelector('[title="原位添加子任务"]'));
+  assert.equal(document.activeElement, draft());
+  await enter('孙任务');
+  const grandchild = latest.find(t => t.title === '孙任务')!;
+  assert.equal(grandchild.parent_id, 'child');
+  await click(row(grandchild.id).querySelector('[title="原位添加子任务"]'));
+  await enter('曾孙任务');
+  assert.equal(latest.find(t => t.title === '曾孙任务')!.parent_id, grandchild.id);
+});
+
+test('actual UI retains completed rows, provides 搞定, and closes on the last sibling', async () => {
+  await mount([task('root'), task('a', 'root'), task('b', 'root')]);
+  await button('全部展开');
+  await click(row('a').querySelector('[title="勾选完成"]'));
+  await button('确认完成');
+  assert.ok(row('a').querySelector('.is-done'));
+  await button('搞定');
+  assert.equal(row('a'), null);
+  assert.ok(row('b'));
+  await click(row('b').querySelector('[title="勾选完成"]'));
+  await button('确认完成');
+  assert.equal(document.querySelectorAll('[data-task-id]').length, 0);
+  assert.ok(latest.every(t => t.status === 'done' && t.archived_at));
+});
+
+test('actual UI adds a child under a retained completed child and reopens that node', async () => {
+  await mount([task('root'), task('a', 'root', 'done'), task('b', 'root')]);
+  await button('全部展开');
+  await click(row('a').querySelector('[title="原位添加子任务"]'));
+  await enter('继续工作');
+  assert.equal(get(latest, 'a').status, 'open');
+  assert.equal(latest.find(t => t.title === '继续工作')!.parent_id, 'a');
+  assert.ok(document.body.textContent?.includes('继续工作'));
+});
+
+test('rejected inline creation retains the entered text', async () => {
+  await mount([task('root')], true);
+  await click(row('root').querySelector('[title="原位添加子任务"]'));
+  await enter('不要丢失这段输入');
+  assert.equal(draft().value, '不要丢失这段输入');
+  assert.equal(latest.length, 1);
+});
+
+for (const view of ['list', 'project_group']) {
+  test(`nested creation and 搞定 work in ${view} view`, async () => {
+    localStorage.setItem('todotree_task_view_mode', view);
+    await mount([task('root'), task('a', 'root', 'done'), task('b', 'root')]);
+    await click(row('b').querySelector('[title="原位添加子任务"]'));
+    await enter('嵌套任务');
+    assert.equal(latest.find(t => t.title === '嵌套任务')!.parent_id, 'b');
+    await button('搞定');
+    assert.equal(row('a'), null);
+  });
+}
+
+import { App } from '../src/App';
+import { applyTaskFilters, DEFAULT_FILTER_STATE } from '../src/services/filterEngine';
+import { syncRecurringTasks } from '../src/services/recurrence';
+
+test('search includes retained done tasks but excludes archived matches', () => {
+  const tasks = [task('root'), task('匹配a', 'root', 'done'), { ...task('匹配b', 'root', 'done'), archived_at: timestamp }, task('unfinished', 'root')];
+  const candidates = new Set(visible(tasks));
+  const result = applyTaskFilters(tasks, { ...DEFAULT_FILTER_STATE, keywords: '匹配' }, '2026-09-24', new Date(), candidates);
+  assert.deepEqual([...result.matchedIds], ['匹配a']);
+  assert.ok(result.contextAncestorIds.has('root'));
+});
+
+test('a new recurring occurrence reopens its archived parent', () => {
+  const rule = { id: 'repeat', type: 'daily' as const, start_date: '2020-01-01' };
+  const child = { ...task('child', 'root', 'done'), archived_at: timestamp, recurrence_rule: rule, recurrence_rule_id: rule.id, recurrence_period_key: 'daily_2020-01-01' };
+  const result = syncRecurringTasks([{ ...task('root', null, 'done'), archived_at: timestamp }, child]);
+  assert.equal(result.addedCount, 1);
+  assert.equal(get(result.updatedTasks, 'root').status, 'open');
+  assert.equal(get(result.updatedTasks, 'root').archived_at, null);
+});
+
+test('App integration: completion, archive, toast undo, parent closure and reload', async () => {
+  let storedTasks = [task('root'), task('a', 'root'), task('b', 'root')];
+  const endpointData = new Map<string, unknown>();
+  const oldFetch = globalThis.fetch;
+  const oldWarn = console.warn;
+  console.warn = () => {}; // IndexedDB is deliberately unavailable; API/localStorage are the test stores.
+  globalThis.fetch = async (input, options) => {
+    const url = String(input);
+    if (options?.method === 'POST') {
+      const value = JSON.parse(String(options.body));
+      if (url === '/api/tasks') storedTasks = value;
+      else endpointData.set(url, value);
+    }
+    const value = url === '/api/tasks' ? storedTasks : url.includes('health')
+      ? { status: 'ok', instance_id: 'test', db_ready: true }
+      : endpointData.get(url) ?? (url.includes('settings') ? {} : []);
+    return new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  const mountApp = async () => {
+    localStorage.setItem('todotree_settings_v1', JSON.stringify({ timezone: 'Asia/Shanghai', reduced_motion: true, schema_version: 2 }));
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root!.render(<App />); await new Promise(resolve => setTimeout(resolve, 10)); });
+  };
+  try {
+    await mountApp();
+    await button('全部展开');
+    await click(row('a').querySelector('[title="勾选完成"]'));
+    await button('确认完成');
+    assert.equal(get(storedTasks, 'a').status, 'done');
+    assert.ok(row('a'));
+    await button('搞定');
+    assert.equal(row('a'), null);
+    assert.ok(get(storedTasks, 'a').archived_at);
+    // The toast callback was created before its operation; it must still use latest tasks.
+    const undoButtons = [...document.querySelectorAll('button')].filter(b => b.textContent?.trim() === '撤销');
+    await click(undoButtons.at(-1)!);
+    assert.ok(row('a')?.querySelector('.is-done'));
+    assert.equal(get(storedTasks, 'a').archived_at, null);
+    await click(row('b').querySelector('[title="勾选完成"]'));
+    await button('确认完成');
+    assert.ok(storedTasks.every(t => t.status === 'done' && t.archived_at));
+    assert.equal(document.querySelectorAll('[data-task-id]').length, 0);
+    await act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })));
+    assert.equal(get(storedTasks, 'root').status, 'open');
+    assert.equal(get(storedTasks, 'a').status, 'done');
+    assert.ok(row('a')?.querySelector('.is-done'));
+    await act(() => root!.unmount()); root = undefined; document.body.innerHTML = '';
+    await mountApp();
+    await button('全部展开');
+    assert.ok(row('a')?.querySelector('.is-done'));
+    assert.equal(get(storedTasks, 'b').status, 'open');
+  } finally {
+    if (root) { await act(() => root!.unmount()); root = undefined; }
+    globalThis.fetch = oldFetch; console.warn = oldWarn;
+  }
+});
+
+test('blur followed by clicking the same parent + creates a fresh focused draft', async () => {
+  await mount([task('root'), task('child', 'root')]);
+  await button('全部展开');
+  await click(row('child').querySelector('[title="原位添加子任务"]'));
+  await act(() => draft().blur());
+  assert.equal(draft(), null);
+  await click(row('child').querySelector('[title="原位添加子任务"]'));
+  assert.ok(draft());
+  assert.equal(document.activeElement, draft());
+  await enter('不需要手动预建孙节点');
+  assert.equal(latest.find(t => t.title === '不需要手动预建孙节点')!.parent_id, 'child');
+});

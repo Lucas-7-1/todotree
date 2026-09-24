@@ -43,6 +43,7 @@ interface TaskTreeProps {
   selectedTaskId: string | null;
   onSelectTask: (task: TaskNode) => void;
   onToggleComplete: (task: TaskNode, outcomeNote?: string) => void;
+  onArchiveCompleted?: (task: TaskNode) => void;
   onUpdateTitle: (id: string, newTitle: string) => void;
   onUpdateQuadrant: (id: string, quadrant: QuadrantType) => void;
   onUpdateDue: (id: string, dueType: DueType, dateStr: string | null) => void;
@@ -70,6 +71,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
   selectedTaskId,
   onSelectTask,
   onToggleComplete,
+  onArchiveCompleted,
   onUpdateTitle,
   onUpdateQuadrant,
   onUpdateDue,
@@ -155,10 +157,11 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
     () => tasks.filter((t) => isTaskVisibleInWorkspace(tasks, t, showCompleted)),
     [tasks, showCompleted]
   );
+  const visibleWorkspaceIds = useMemo(() => new Set(visibleWorkspaceTasks.map(t => t.id)), [visibleWorkspaceTasks]);
 
   const filterResult = useMemo(() => {
-    return applyTaskFilters(tasks, filterState, todayStr);
-  }, [tasks, filterState, todayStr]);
+    return applyTaskFilters(tasks, filterState, todayStr, new Date(), visibleWorkspaceIds);
+  }, [tasks, filterState, todayStr, visibleWorkspaceIds]);
 
   // When searching, auto-expand necessary ancestors
   useEffect(() => {
@@ -242,24 +245,20 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
     // Auto-expand parent node
     setExpandedMap((prev) => ({ ...prev, [parentId]: true }));
 
-    // If draft already exists for this parent, keep it and avoid duplicating (PRD 6.3)
-    if (inlineDraft?.parentId === parentId) {
-      return;
-    }
-
-    // Set inline draft
-    setInlineDraft({
+    // Read current state: blur may already have removed the previous draft before click.
+    setInlineDraft(current => current?.parentId === parentId ? current : {
       parentId,
       tempId: 'draft-' + Date.now(),
     });
   };
 
-  const handleInlineSubmit = (parentId: string, title: string, continuous: boolean) => {
+  const handleInlineSubmit = (parentId: string, title: string, continuous: boolean): boolean => {
     if (onAddTaskInline) {
       const created = onAddTaskInline(parentId, title);
+      if (!created) return false;
       if (created && filterActive) {
         // Check if created task matches active filter
-        const matches = filterResult.matchedIds.has(created.id);
+        const matches = applyTaskFilters([...tasks, created], filterState, todayStr).matchedIds.has(created.id);
         if (!matches && onShowToastWithAction) {
           onShowToastWithAction('任务已创建，当前筛选下不可见', '清空筛选并定位', () => {
             setFilterState(DEFAULT_FILTER_STATE);
@@ -279,6 +278,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
     } else {
       setInlineDraft(null);
     }
+    return true;
   };
 
   const handleInlineCancel = () => {
@@ -354,6 +354,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
             isSelected={isSelected}
             onSelect={onSelectTask}
             onToggleComplete={onToggleComplete}
+            onArchiveCompleted={onArchiveCompleted}
             onUpdateTitle={onUpdateTitle}
             onUpdateQuadrant={onUpdateQuadrant}
             onUpdateDue={onUpdateDue}
@@ -454,6 +455,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
                     isSelected={selectedTaskId === task.id}
                     onSelect={onSelectTask}
                     onToggleComplete={onToggleComplete}
+                    onArchiveCompleted={onArchiveCompleted}
                     onUpdateTitle={onUpdateTitle}
                     onUpdateQuadrant={onUpdateQuadrant}
                     onUpdateDue={onUpdateDue}
@@ -542,6 +544,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
                       isSelected={selectedTaskId === task.id}
                       onSelect={onSelectTask}
                       onToggleComplete={onToggleComplete}
+                    onArchiveCompleted={onArchiveCompleted}
                       onUpdateTitle={onUpdateTitle}
                       onUpdateQuadrant={onUpdateQuadrant}
                       onUpdateDue={onUpdateDue}

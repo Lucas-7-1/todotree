@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import confetti from 'canvas-confetti';
 import { Sparkles } from 'lucide-react';
 import {
   TaskNode,
@@ -19,6 +18,7 @@ import {
   SaveStatus,
 } from './services/storage';
 import { undoManager } from './services/undoManager';
+import { completeTaskBranch, archiveCompletedBranch, reopenTaskBranch, insertTaskNode } from './services/taskLifecycle';
 import {
   generateId,
   canMoveSubtree,
@@ -72,6 +72,8 @@ import { buildFactsPackage } from './services/ai/factsEngine';
 
 export const App: React.FC = () => {
   const [tasks, setTasks] = useState<TaskNode[]>([]);
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
   const [settings, setSettings] = useState<AppSettings>(loadSettingsFromStorage());
   const [currentView, setCurrentView] = useState<ViewType>('tree');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -271,6 +273,7 @@ export const App: React.FC = () => {
             if (openChildren.length > 0) {
               t.status = 'open';
               t.completed_at = null;
+              t.archived_at = null;
               t.updated_at = nowStr;
               hasCalibrated = true;
             }
@@ -389,6 +392,7 @@ export const App: React.FC = () => {
         undoManager.pushStep(actionDesc, tasks);
         setUndoStackVersion((v) => v + 1);
       }
+      tasksRef.current = newTasks;
       setTasks(newTasks);
       setSaveStatus('saving');
       saveTasksToStorage(newTasks)
@@ -402,21 +406,26 @@ export const App: React.FC = () => {
     [tasks]
   );
 
+  const logCompletionTransitions = (before: TaskNode[], after: TaskNode[]) => {
+    const previous = new Map(before.map(t => [t.id, t]));
+    const reopened: string[] = [];
+    const completed: TaskNode[] = [];
+    for (const task of after) {
+      const old = previous.get(task.id);
+      if (!old || task.deleted_at) continue;
+      if (old.status === 'done' && task.status === 'open') reopened.push(task.id);
+      if (old.status === 'open' && task.status === 'done') completed.push(task);
+    }
+    if (reopened.length) logTaskUncompletionsBatch(reopened, before).catch(console.error);
+    if (completed.length) logTaskCompletionsBatch(completed, after, {}).catch(console.error);
+  };
+
   // Undo / Redo handlers
   const handleUndo = useCallback(() => {
-    const res = undoManager.undo(tasks);
+    const currentTasks = tasksRef.current;
+    const res = undoManager.undo(currentTasks);
     if (res) {
-      // Find tasks that changed from done -> open to unlog completion events
-      const uncompletedTaskIds: string[] = [];
-      for (const nextT of res.newTasks) {
-        const prevT = tasks.find((t) => t.id === nextT.id);
-        if (prevT && prevT.status === 'done' && nextT.status === 'open') {
-          uncompletedTaskIds.push(nextT.id);
-        }
-      }
-      if (uncompletedTaskIds.length > 0) {
-        logTaskUncompletionsBatch(uncompletedTaskIds, tasks).catch(console.error);
-      }
+      logCompletionTransitions(currentTasks, res.newTasks);
 
       updateTasksWithSave(res.newTasks, `撤销: ${res.description}`, false);
       setUndoStackVersion((v) => v + 1);
@@ -429,18 +438,10 @@ export const App: React.FC = () => {
   }, [tasks, updateTasksWithSave]);
 
   const handleRedo = useCallback(() => {
-    const res = undoManager.redo(tasks);
+    const currentTasks = tasksRef.current;
+    const res = undoManager.redo(currentTasks);
     if (res) {
-      const reCompletedTasks: TaskNode[] = [];
-      for (const nextT of res.newTasks) {
-        const prevT = tasks.find((t) => t.id === nextT.id);
-        if (prevT && prevT.status === 'open' && nextT.status === 'done') {
-          reCompletedTasks.push(nextT);
-        }
-      }
-      if (reCompletedTasks.length > 0) {
-        logTaskCompletionsBatch(reCompletedTasks, res.newTasks, {}).catch(console.error);
-      }
+      logCompletionTransitions(currentTasks, res.newTasks);
 
       updateTasksWithSave(res.newTasks, `重做: ${res.description}`, false);
       setUndoStackVersion((v) => v + 1);
@@ -544,12 +545,13 @@ export const App: React.FC = () => {
     quadrant: QuadrantType = null,
     recurrenceRule?: RecurrenceRule | null
   ): TaskNode | null => {
+    const currentTasks = tasksRef.current;
     // Check depth
     let depth = 1;
     if (parentId) {
-      const parent = tasks.find((t) => t.id === parentId);
+      const parent = currentTasks.find((t) => t.id === parentId);
       if (parent) {
-        depth = getNodeDepth(tasks, parent) + 1;
+        depth = getNodeDepth(currentTasks, parent) + 1;
       }
     }
     if (depth > 5) {
@@ -570,6 +572,7 @@ export const App: React.FC = () => {
       sort_order: Date.now(),
       status: 'open',
       completed_at: null,
+      archived_at: null,
       due_type: dueType,
       due_date: dueDate,
       due_at: null,
@@ -586,12 +589,17 @@ export const App: React.FC = () => {
       deletion_batch_id: null,
     };
 
-    const nextTasks = [...tasks, newTask];
-    undoManager.pushDelta({
-      type: 'create',
-      description: `添加任务「${newTask.title}」`,
-      createdTasks: [newTask],
-    });
+    let nextTasks: TaskNode[];
+    try {
+      nextTasks = insertTaskNode(currentTasks, newTask);
+    } catch (error) {
+      setToast({ id: 'add-error-' + Date.now(), type: 'error', title: (error as Error).message });
+      return null;
+    }
+    const nextById = new Map(nextTasks.map(t => [t.id, t]));
+    const reopenedIds = currentTasks.filter(t => t.status === 'done' && nextById.get(t.id)?.status === 'open').map(t => t.id);
+    if (reopenedIds.length) logTaskUncompletionsBatch(reopenedIds, currentTasks).catch(console.error);
+    undoManager.pushTaskDiff(`添加任务「${newTask.title}」`, currentTasks, nextTasks);
     setUndoStackVersion((v) => v + 1);
     updateTasksWithSave(nextTasks, `添加任务「${newTask.title}」`, false);
     setQuickInputParentId(null);
@@ -602,274 +610,72 @@ export const App: React.FC = () => {
     return handleAddTask(title, parentId);
   };
 
-  // 2. Toggle Task Complete (PRD Incremental v1.1 Section 3: 二次确认完成与向上自动闭环)
+  // All completion entry points share the same subtree/ancestor transition.
   const handleToggleComplete = (task: TaskNode, outcomeNote?: string) => {
-    const isNowDone = task.status === 'open';
-
-    if (isNowDone) {
-      // Find incomplete descendants to complete simultaneously
-      const descendants = getDescendantTasks(tasks, task.id);
-      const incompleteDescendants = descendants.filter(
-        (d) => !d.deleted_at && d.status === 'open'
-      );
-
-      const completedTime = new Date().toISOString();
-      const finalOutcome = outcomeNote !== undefined ? outcomeNote : task.outcome_note || '';
-      const idsToComplete = new Set<string>([task.id, ...incompleteDescendants.map((d) => d.id)]);
-      const autoClosedAncestorIds: string[] = [];
-
-      // Recursive upward closure check (PRD Incremental v1.1 Section 3.5)
-      let currParentId = task.parent_id;
-      while (currParentId) {
-        const parentNode = tasks.find((t) => t.id === currParentId);
-        if (
-          !parentNode ||
-          parentNode.deleted_at ||
-          parentNode.status === 'done' ||
-          idsToComplete.has(parentNode.id)
-        ) {
-          break;
-        }
-        const siblings = tasks.filter((t) => t.parent_id === currParentId && !t.deleted_at);
-        const allSiblingsDone =
-          siblings.length > 0 &&
-          siblings.every((s) => s.status === 'done' || idsToComplete.has(s.id));
-        if (allSiblingsDone) {
-          idsToComplete.add(parentNode.id);
-          autoClosedAncestorIds.push(parentNode.id);
-          currParentId = parentNode.parent_id;
-        } else {
-          break;
-        }
-      }
-
-      const changedItems: Array<{
-        taskId: string;
-        from: 'open' | 'done';
-        to: 'open' | 'done';
-        completed_at?: string | null;
-      }> = [];
-
-      const nextTasks = tasks.map((t) => {
-        if (idsToComplete.has(t.id)) {
-          changedItems.push({
-            taskId: t.id,
-            from: t.status,
-            to: 'done',
-            completed_at: t.completed_at,
-          });
-          return {
-            ...t,
-            status: 'done' as const,
-            completed_at: completedTime,
-            outcome_note: t.id === task.id ? finalOutcome : t.outcome_note || '',
-            updated_at: completedTime,
-          };
-        }
-        return t;
-      });
-
-      // Unified action description
-      let actionDesc = `完成任务「${task.title}」`;
-      if (autoClosedAncestorIds.length > 0) {
-        actionDesc = `已完成「${task.title}」，并关闭 ${autoClosedAncestorIds.length} 个上级任务`;
-      } else if (incompleteDescendants.length > 0) {
-        actionDesc = `完成「${task.title}」及 ${incompleteDescendants.length} 项子任务`;
-      }
-
-      // Record atomic delta undo step covering child and auto-closed ancestors
-      undoManager.pushStatusChange(changedItems, actionDesc);
-      setUndoStackVersion((v) => v + 1);
-
-      // Batch Log AI completion events (PRD Incremental v1.1 P0 Performance Optimization)
-      const tasksToLog: TaskNode[] = [];
-      for (const cid of Array.from(idsToComplete)) {
-        const tNode = tasks.find((t) => t.id === cid);
-        if (tNode) {
-          tasksToLog.push({ ...tNode, completed_at: completedTime });
-        }
-      }
-
-      if (tasksToLog.length > 0) {
-        logTaskCompletionsBatch(
-          tasksToLog,
-          tasks,
-          { [task.id]: finalOutcome }
-        ).catch(console.error);
-      }
-
-      // Trigger Confetti if motion enabled
-      if (!settings.reduced_motion) {
-        confetti({
-          particleCount: incompleteDescendants.length > 0 || autoClosedAncestorIds.length > 0 ? 60 : 40,
-          spread: 60,
-          origin: { y: 0.8 },
-          colors: ['#3b82f6', '#10b981', '#f59e0b'],
-        });
-      }
-
-      const { updatedTasks } = syncRecurringTasks(nextTasks);
-      updateTasksWithSave(updatedTasks, actionDesc, false);
-
-      // Toast feedback with 8s undo (PRD 3.3: Completed drawer remains closed)
-      setToast({
-        id: 'toast-' + Date.now(),
-        type: 'complete',
-        title: actionDesc,
-        canUndo: true,
-        onUndo: () => {
-          handleUndo();
-        },
-        onViewCompleted: () => {
-          setIsCompletedDrawerOpen(true);
-        },
-      });
-    } else {
-      // Re-open
-      const nextTasks = tasks.map((t) =>
-        t.id === task.id
-          ? { ...t, status: 'open' as const, completed_at: null, updated_at: new Date().toISOString() }
-          : t
-      );
-      undoManager.pushStatusChange(
-        [{ taskId: task.id, from: 'done', to: 'open', completed_at: task.completed_at }],
-        `重新开启任务「${task.title}」`
-      );
-      setUndoStackVersion((v) => v + 1);
-      logTaskUncompletionsBatch([task.id], tasks).catch(console.error);
-      updateTasksWithSave(nextTasks, `重新开启任务「${task.title}」`, false);
+    const currentTasks = tasksRef.current;
+    const current = currentTasks.find(t => t.id === task.id && !t.deleted_at);
+    if (!current) return;
+    if (current.status === 'done') {
+      handleRestoreTask(current);
+      return;
     }
+
+    const result = completeTaskBranch(currentTasks, current.id, outcomeNote);
+    if (!result.completedTasks.length) return;
+    const { updatedTasks } = syncRecurringTasks(result.tasks);
+    const actionDesc = result.autoClosedIds.length
+      ? `已完成「${current.title}」，并闭环 ${result.autoClosedIds.length} 个上级任务`
+      : `已完成「${current.title}」`;
+    undoManager.pushTaskDiff(actionDesc, currentTasks, updatedTasks);
+    setUndoStackVersion(v => v + 1);
+    logTaskCompletionsBatch(result.completedTasks, currentTasks, { [current.id]: outcomeNote ?? current.outcome_note ?? '' }).catch(console.error);
+    updateTasksWithSave(updatedTasks, actionDesc, false);
+    closeAuxiliaryPanel();
+    setToast({
+      id: 'complete-' + Date.now(), type: 'complete', title: actionDesc,
+      canUndo: true, onUndo: handleUndo,
+      onViewCompleted: () => setIsCompletedDrawerOpen(true),
+    });
   };
 
-  // Confirm completing parent + all incomplete children (fallback modal if invoked)
+  const handleArchiveCompleted = (task: TaskNode) => {
+    const currentTasks = tasksRef.current;
+    const nextTasks = archiveCompletedBranch(currentTasks, task.id);
+    if (nextTasks === currentTasks) return;
+    const description = `已归档「${task.title}」`;
+    undoManager.pushTaskDiff(description, currentTasks, nextTasks);
+    setUndoStackVersion(v => v + 1);
+    updateTasksWithSave(nextTasks, description, false);
+    closeAuxiliaryPanel();
+    setToast({
+      id: 'archive-' + Date.now(), type: 'complete', title: description,
+      canUndo: true, onUndo: handleUndo,
+      onViewCompleted: () => setIsCompletedDrawerOpen(true),
+    });
+  };
+
   const handleConfirmCompleteParent = () => {
     if (!parentCompleteTarget) return;
-    const completedTime = new Date().toISOString();
-    const descendants = getDescendantTasks(tasks, parentCompleteTarget.id);
-    const descendantIds = new Set(
-      descendants.filter((d) => !d.deleted_at && d.status === 'open').map((d) => d.id)
-    );
-    descendantIds.add(parentCompleteTarget.id);
-
-    const changedItems: Array<{
-      taskId: string;
-      from: 'open' | 'done';
-      to: 'open' | 'done';
-      completed_at?: string | null;
-    }> = [];
-
-    const nextTasks = tasks.map((t) => {
-      if (descendantIds.has(t.id)) {
-        changedItems.push({
-          taskId: t.id,
-          from: t.status,
-          to: 'done',
-          completed_at: t.completed_at,
-        });
-        return { ...t, status: 'done' as const, completed_at: completedTime, updated_at: completedTime };
-      }
-      return t;
-    });
-
-    const tasksToLog: TaskNode[] = [];
-    for (const dId of Array.from(descendantIds)) {
-      const dTask = tasks.find((t) => t.id === dId);
-      if (dTask) {
-        tasksToLog.push({ ...dTask, completed_at: completedTime });
-      }
-    }
-
-    if (tasksToLog.length > 0) {
-      logTaskCompletionsBatch(tasksToLog, tasks, {}).catch(console.error);
-    }
-
-    if (!settings.reduced_motion) {
-      confetti({
-        particleCount: 70,
-        spread: 70,
-        origin: { y: 0.75 },
-      });
-    }
-
-    const actionDesc = `完成「${parentCompleteTarget.title}」及其全部子任务`;
-    undoManager.pushStatusChange(changedItems, actionDesc);
-    setUndoStackVersion((v) => v + 1);
-    updateTasksWithSave(nextTasks, actionDesc, false);
-
-    setToast({
-      id: 'toast-parent-' + Date.now(),
-      type: 'complete',
-      title: `已完成「${parentCompleteTarget.title}」及 ${parentCompleteIncompleteCount} 项子任务`,
-      canUndo: true,
-      onUndo: () => {
-        handleUndo();
-      },
-      onViewCompleted: () => {
-        setIsCompletedDrawerOpen(true);
-      },
-    });
-
+    handleToggleComplete(parentCompleteTarget);
     setParentCompleteTarget(null);
   };
 
-  // 3. Restore Task (PRD 1.2 & 6.3: 向上递归恢复所有未完成的上级节点)
+  // Restore target/ancestors together; archived siblings keep their history.
   const handleRestoreTask = (target: TaskNode | string, includeDescendants = false) => {
-    const task = typeof target === 'string' ? tasks.find((t) => t.id === target) : target;
+    const currentTasks = tasksRef.current;
+    const id = typeof target === 'string' ? target : target.id;
+    const task = currentTasks.find(t => t.id === id && !t.deleted_at);
     if (!task) return;
-
-    // Find all completed ancestors that must be restored so tree structure remains intact
-    const ancestors = getAncestorNodes(tasks, task);
-    const completedAncestors = ancestors.filter((a) => a.status === 'done');
-    const restoreIds = new Set<string>([task.id, ...completedAncestors.map((a) => a.id)]);
-
-    if (includeDescendants) {
-      const descendants = getDescendantTasks(tasks, task.id);
-      for (const d of descendants) {
-        if (d.status === 'done') restoreIds.add(d.id);
-      }
-    }
-
-    const changedItems: Array<{
-      taskId: string;
-      from: 'open' | 'done';
-      to: 'open' | 'done';
-      completed_at?: string | null;
-    }> = [];
-
-    const nextTasks = tasks.map((t) => {
-      if (restoreIds.has(t.id)) {
-        changedItems.push({
-          taskId: t.id,
-          from: t.status,
-          to: 'open',
-          completed_at: t.completed_at,
-        });
-        return { ...t, status: 'open' as const, completed_at: null, updated_at: new Date().toISOString() };
-      }
-      return t;
-    });
-
-    const ancestorCount = completedAncestors.length;
-    const actionDesc = `恢复「${task.title}」${ancestorCount > 0 ? `及 ${ancestorCount} 个上级` : ''}`;
-    undoManager.pushStatusChange(changedItems, actionDesc);
-    setUndoStackVersion((v) => v + 1);
-    if (restoreIds.size > 0) {
-      logTaskUncompletionsBatch(Array.from(restoreIds), tasks).catch(console.error);
-    }
-    updateTasksWithSave(nextTasks, actionDesc, false);
-
-    setToast({
-      id: 'restore-' + Date.now(),
-      type: 'info',
-      title:
-        ancestorCount > 0
-          ? `已恢复此项及 ${ancestorCount} 个上级节点`
-          : `已恢复「${task.title}」`,
-      canUndo: true,
-      onUndo: () => {
-        handleUndo();
-      },
-    });
+    const nextTasks = reopenTaskBranch(currentTasks, id, includeDescendants);
+    const previous = new Map(currentTasks.map(t => [t.id, t]));
+    const reopenedIds = nextTasks.filter(t => t.status === 'open' && previous.get(t.id)?.status === 'done').map(t => t.id);
+    if (!reopenedIds.length) return;
+    const description = `恢复「${task.title}」`;
+    undoManager.pushTaskDiff(description, currentTasks, nextTasks);
+    setUndoStackVersion(v => v + 1);
+    logTaskUncompletionsBatch(reopenedIds, currentTasks).catch(console.error);
+    updateTasksWithSave(nextTasks, description, false);
+    setToast({ id: 'restore-' + Date.now(), type: 'info', title: description, canUndo: true, onUndo: handleUndo });
   };
 
   // 4. Update Node Title
@@ -1051,6 +857,7 @@ export const App: React.FC = () => {
       title: `${task.title} (副本)`,
       status: 'open',
       completed_at: null,
+      archived_at: null,
       due_type: 'none',
       due_date: null,
       due_at: null,
@@ -1080,6 +887,7 @@ export const App: React.FC = () => {
           parent_id: clonedParentId,
           status: 'open',
           completed_at: null,
+          archived_at: null,
           due_type: 'none',
           due_date: null,
           due_at: null,
@@ -1215,7 +1023,13 @@ export const App: React.FC = () => {
       nextTasks.splice(targetIdx + 1, 0, updatedDragged);
     }
 
-    updateTasksWithSave(nextTasks, `移动节点「${dragged.title}」`);
+    if (dragged.status === 'open' && newParentId) {
+      nextTasks = reopenTaskBranch(nextTasks, newParentId);
+      logCompletionTransitions(tasks, nextTasks);
+    }
+    undoManager.pushTaskDiff(`移动节点「${dragged.title}」`, tasks, nextTasks);
+    setUndoStackVersion(v => v + 1);
+    updateTasksWithSave(nextTasks, `移动节点「${dragged.title}」`, false);
   };
 
   // 12. Apply Template (PRD Section 8)
@@ -1320,6 +1134,7 @@ export const App: React.FC = () => {
           ...t,
           status: 'open' as const,
           completed_at: null,
+          archived_at: null,
           updated_at: nowStr,
         };
       }
@@ -1388,6 +1203,7 @@ export const App: React.FC = () => {
           ...t,
           status: 'open' as const,
           completed_at: null,
+          archived_at: null,
           updated_at: nowStr,
         };
       }
@@ -1598,6 +1414,7 @@ export const App: React.FC = () => {
                 selectedTaskId={selectedTaskId}
                 onSelectTask={handleSelectTask}
                 onToggleComplete={handleToggleComplete}
+                onArchiveCompleted={handleArchiveCompleted}
                 onUpdateTitle={handleUpdateTitle}
                 onUpdateQuadrant={handleUpdateQuadrant}
                 onUpdateDue={handleUpdateDue}
