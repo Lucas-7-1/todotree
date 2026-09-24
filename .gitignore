@@ -1,0 +1,22 @@
+﻿# Dependencies
+node_modules/
+
+# Local database & logs
+data/
+*.log
+.test_sandbox_run/
+
+# Build caches & temp
+.cache/
+.temp/
+desktop-host/bin/
+desktop-host/obj/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment
+.env
+.env.local
