@@ -4,13 +4,15 @@ import { CornerDownLeft, Plus, X } from 'lucide-react';
 interface InlineTaskDraftRowProps {
   parentId: string;
   level: number;
+  tempId?: string;
   onSubmit: (parentId: string, title: string, continuous: boolean) => boolean;
-  onCancel: () => void;
+  onCancel: (tempId?: string) => void;
 }
 
 export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
   parentId,
   level,
+  tempId,
   onSubmit,
   onCancel,
 }) => {
@@ -70,7 +72,7 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
     } else if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      onCancel();
+      onCancel(tempId);
     }
   };
 
@@ -81,7 +83,7 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
       if (trimmed) {
         handleCommit(false);
       } else {
-        onCancel();
+        onCancel(tempId);
       }
     }
   };
@@ -140,7 +142,7 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
           </span>
           <button
             type="button"
-            onClick={onCancel}
+            onClick={() => onCancel(tempId)}
             className="p-1 text-slate-400 hover:text-slate-600 rounded transition-colors"
             title="取消新增 (Esc)"
           >

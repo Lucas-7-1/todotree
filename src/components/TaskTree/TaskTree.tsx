@@ -242,8 +242,17 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
       return;
     }
 
-    // Auto-expand parent node
-    setExpandedMap((prev) => ({ ...prev, [parentId]: true }));
+    // Auto-expand parent node and all its ancestors so the input is visible
+    setExpandedMap((prev) => {
+      const next = { ...prev, [parentId]: true };
+      let curr = parent.parent_id;
+      while (curr) {
+        next[curr] = true;
+        const p = tasks.find((t) => t.id === curr);
+        curr = p ? p.parent_id : null;
+      }
+      return next;
+    });
 
     // Read current state: blur may already have removed the previous draft before click.
     setInlineDraft(current => current?.parentId === parentId ? current : {
@@ -281,8 +290,12 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
     return true;
   };
 
-  const handleInlineCancel = () => {
-    setInlineDraft(null);
+  const handleInlineCancel = (tempId?: string) => {
+    setInlineDraft((current) => {
+      if (!current) return null;
+      if (tempId && current.tempId !== tempId) return current;
+      return null;
+    });
   };
 
   // Move node with validation
@@ -387,6 +400,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
         {isDraftHere && (
           <InlineTaskDraftRow
             key={inlineDraft.tempId}
+            tempId={inlineDraft.tempId}
             parentId={parentId!}
             level={level}
             onSubmit={handleInlineSubmit}
@@ -474,6 +488,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
                   {inlineDraft && inlineDraft.parentId === task.id && (
                     <InlineTaskDraftRow
                       key={inlineDraft.tempId}
+                      tempId={inlineDraft.tempId}
                       parentId={task.id}
                       level={2}
                       onSubmit={handleInlineSubmit}
@@ -563,6 +578,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
                     {inlineDraft && inlineDraft.parentId === task.id && (
                       <InlineTaskDraftRow
                         key={inlineDraft.tempId}
+                        tempId={inlineDraft.tempId}
                         parentId={task.id}
                         level={2}
                         onSubmit={handleInlineSubmit}
