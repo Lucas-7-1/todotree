@@ -24,6 +24,14 @@ jobs:
       - run: npm test
       - run: npm run android:sync
       - run: chmod +x android/gradlew && cd android && ./gradlew assembleDebug assembleRelease --no-daemon
+      - name: Android storage integration test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: cd android && ./gradlew connectedDebugAndroidTest --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: TodoTree-Android-debug-${{ github.run_number }}

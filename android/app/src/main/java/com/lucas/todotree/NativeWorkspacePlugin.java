@@ -96,6 +96,10 @@ public class NativeWorkspacePlugin extends Plugin {
         }
         data.put("ai_settings",ai); o.put("data",data); return o;
     }
+    @Override protected void handleOnDestroy() {
+        for(Request r:requests.values()) { r.cancelled=true; if(r.connection!=null) r.connection.disconnect(); }
+        network.shutdownNow(); disk.execute(() -> helper.close()); disk.shutdown();
+    }
     @PluginMethod public void read(PluginCall call) {
         disk.execute(() -> { try { call.resolve(snapshot(helper.getReadableDatabase(),true)); }
             catch(Exception e) { call.reject("读取本地数据库失败，未清空数据", "READ_FAILED"); } });
@@ -119,7 +123,7 @@ public class NativeWorkspacePlugin extends Plugin {
                 if(op==null || op.isEmpty()) throw new Exception("缺少操作编号");
                 if(op.equals(get(db,"operation_id",""))) { call.resolve(ack(db)); return; }
                 long revision=Long.parseLong(get(db,"revision","0"));
-                if(call.getLong("expected_revision",-1L)!=revision) throw new Exception("数据版本冲突，请重新打开应用");
+                if(call.getData().getLong("expected_revision")!=revision) throw new Exception("数据版本冲突，请重新打开应用");
                 backup(db,call.getBoolean("checkpoint",false));
                 JSONArray changes=call.getArray("changes"); if(changes==null) throw new Exception("缺少变更数据");
                 JSONObject ai=new JSONObject(call.getObject("ai_settings",new JSObject()).toString());
