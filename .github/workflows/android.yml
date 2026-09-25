@@ -39,10 +39,7 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: |
-            cd android && ./gradlew :app:connectedDebugAndroidTest --no-daemon
-            mkdir -p "$GITHUB_WORKSPACE/android/app/build/outputs/mobile-ui"
-            adb pull /sdcard/Android/data/com.lucas.todotree/files/screenshots "$GITHUB_WORKSPACE/android/app/build/outputs/mobile-ui"
+          script: bash -c 'cd android; ./gradlew :app:connectedDebugAndroidTest --no-daemon; test_status=$?; mkdir -p app/build/outputs/mobile-ui; adb pull /sdcard/Android/data/com.lucas.todotree/files/screenshots app/build/outputs/mobile-ui || exit 1; exit "$test_status"'
       - name: Preserve Android test reports
         if: always()
         uses: actions/upload-artifact@v4

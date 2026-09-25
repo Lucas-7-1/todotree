@@ -1,6 +1,9 @@
 package com.lucas.todotree;
 import static org.junit.Assert.*;
 import android.content.Context;
+import android.content.ContextWrapper;
+import android.database.DatabaseErrorHandler;
+import java.io.File;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -28,8 +31,23 @@ public class NativeWorkspaceTest {
     }
     JSObject read(NativeWorkspacePlugin p) throws Exception { Call c=new Call(new JSObject());p.read(c);return c.await(); }
     @Test public void atomicCommitRetryRollbackReopenAndEncryptedKey() throws Exception {
-        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assertEquals("com.lucas.todotree",context.getPackageName());
+        Context target=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        assertEquals("com.lucas.todotree",target.getPackageName());
+        // Never delete the live WebView workspace left by another instrumented test.
+        Context context=new ContextWrapper(target) {
+            private String testName(String name) { return "storage-test-"+name; }
+            @Override public File getDatabasePath(String name) { return target.getDatabasePath(testName(name)); }
+            @Override public boolean deleteDatabase(String name) { return target.deleteDatabase(testName(name)); }
+            @Override public SQLiteDatabase openOrCreateDatabase(String name,int mode,SQLiteDatabase.CursorFactory factory) {
+                return target.openOrCreateDatabase(testName(name),mode,factory);
+            }
+            @Override public SQLiteDatabase openOrCreateDatabase(String name,int mode,SQLiteDatabase.CursorFactory factory,DatabaseErrorHandler handler) {
+                return target.openOrCreateDatabase(testName(name),mode,factory,handler);
+            }
+            @Override public File getFilesDir() {
+                File dir=new File(target.getFilesDir(),"storage-test");dir.mkdirs();return dir;
+            }
+        };
         context.deleteDatabase("todotree.db");
         NativeWorkspacePlugin p=plugin(context);
         try {
