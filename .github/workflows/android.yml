@@ -39,7 +39,15 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: cd android && ./gradlew connectedDebugAndroidTest --no-daemon
+          script: cd android && ./gradlew :app:connectedDebugAndroidTest --no-daemon
+      - name: Preserve Android test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TodoTree-Android-tests-${{ github.run_number }}
+          path: android/app/build/reports/androidTests/connected/**
+          if-no-files-found: ignore
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: TodoTree-Android-debug-${{ github.run_number }}
