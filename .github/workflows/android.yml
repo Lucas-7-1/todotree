@@ -39,7 +39,7 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: bash -c 'cd android; ./gradlew :app:connectedDebugAndroidTest --no-daemon; test_status=$?; mkdir -p app/build/outputs/mobile-ui; adb pull /sdcard/Android/data/com.lucas.todotree/files/screenshots app/build/outputs/mobile-ui || exit 1; exit "$test_status"'
+          script: bash -c 'cd android; ./gradlew :app:connectedDebugAndroidTest --no-daemon; test_status=$?; mkdir -p app/build/outputs/mobile-ui; adb pull /sdcard/Download/todotree-ui app/build/outputs/mobile-ui || exit 1; exit "$test_status"'
       - name: Preserve Android test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -51,6 +51,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: TodoTree-Android-debug-${{ github.run_number }}
           path: |

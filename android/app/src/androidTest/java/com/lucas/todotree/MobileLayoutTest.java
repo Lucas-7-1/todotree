@@ -3,6 +3,7 @@ package com.lucas.todotree;
 import static org.junit.Assert.*;
 import android.graphics.Bitmap;
 import android.os.SystemClock;
+import android.os.ParcelFileDescriptor;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -40,6 +41,14 @@ public class MobileLayoutTest {
         assertTrue(dir.exists() || dir.mkdirs());
         try(FileOutputStream out=new FileOutputStream(new File(dir,name+".png"))) { bitmap.compress(Bitmap.CompressFormat.PNG,100,out); }
         bitmap.recycle();
+        // Gradle uninstalls the app after connected tests, deleting its external files.
+        // Export test-only captures with the instrumentation shell before that cleanup.
+        String source=new File(dir,name+".png").getAbsolutePath();
+        ParcelFileDescriptor command=InstrumentationRegistry.getInstrumentation().getUiAutomation()
+            .executeShellCommand("mkdir -p /sdcard/Download/todotree-ui && cp "+source+" /sdcard/Download/todotree-ui/"+name+".png");
+        try(ParcelFileDescriptor.AutoCloseInputStream stream=new ParcelFileDescriptor.AutoCloseInputStream(command)) {
+            byte[] buffer=new byte[1024];while(stream.read(buffer)!=-1) { /* wait for copy */ }
+        }
     }
     @Test public void todayAndCalendarRespectSafeAreas() throws Exception {
         try(ActivityScenario<MainActivity> activity=ActivityScenario.launch(MainActivity.class)) {
