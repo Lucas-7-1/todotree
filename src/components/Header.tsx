@@ -42,7 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   const dateSubtitle = `${month}月${day}日 · ${weekday}`;
 
   return (
-    <header className="min-h-[64px] max-h-[72px] px-6 py-2 flex items-center justify-between border-b border-slate-100 bg-white">
+    <header className="workspace-header min-h-[64px] max-h-[72px] px-6 py-2 flex items-center justify-between border-b border-slate-100 bg-white">
       <div>
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{title}</h1>
@@ -127,7 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Templates button */}
         <button
           onClick={onOpenTemplateModal}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+          className="desktop-template-button flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
         >
           <Sparkles className="w-3.5 h-3.5 text-blue-600" />
           <span>快捷模板</span>

@@ -1,3 +1,4 @@
+import { isAndroid, NativeWorkspace, workspaceDelta } from './native/platform';
 import { TaskNode, AppSettings } from '../types/todo';
 import { TaskEvent, SavedReport, AISettings, AIAttempt } from '../types/ai';
 
@@ -132,14 +133,15 @@ async function readLegacyBrowser(): Promise<TaskNode[]> {
 export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
   if (snapshot) return clone(snapshot);
   if (!loading) loading = (async () => {
-    if (!isDesktop() && ['127.0.0.1', 'localhost'].includes(window.location.hostname)) {
+    if (!isAndroid() && !isDesktop() && ['127.0.0.1', 'localhost'].includes(window.location.hostname)) {
       try {
         const health = await request('/api/health');
         if (health?.instance_id) (window as any).__TODOTREE_DESKTOP__ = true;
       } catch { /* Web development server has no host API. */ }
     }
     let result: WorkspaceSnapshot | null;
-    if (isDesktop()) result = await request('/api/workspace');
+    if (isAndroid()) result = await NativeWorkspace.read();
+    else if (isDesktop()) result = await request('/api/workspace');
     else {
       result = await readBrowser();
       if (!result) {
@@ -168,7 +170,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
     validateWorkspace(result);
     // Do not overwrite a recovery candidate after an ambiguous/lost write response.
     let pendingRaw: string | null = null;
-    try { pendingRaw = localStorage.getItem(PENDING_KEY); } catch {}
+    try { if (!isAndroid()) pendingRaw = localStorage.getItem(PENDING_KEY); } catch {}
     if (pendingRaw) {
       const pending = JSON.parse(pendingRaw);
       if (pending.operation_id !== result.operation_id) {
@@ -177,7 +179,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       } else { try { localStorage.removeItem(PENDING_KEY); } catch {} }
     }
     snapshot = clone(result);
-    if (!blocked) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(result)); } catch {} }
+    if (!blocked && !isAndroid()) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(result)); } catch {} }
     return clone(result);
   })().catch(error => { loading = null; throw error; });
   return clone(await loading);
@@ -185,13 +187,16 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
 
 function publish(next: WorkspaceSnapshot) {
   snapshot = clone(next);
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(next)); localStorage.removeItem(PENDING_KEY); } catch {}
+  try { if (!isAndroid()) { localStorage.setItem(CACHE_KEY, JSON.stringify(next)); localStorage.removeItem(PENDING_KEY); } } catch {}
   window.dispatchEvent(new CustomEvent('todotree:persisted', { detail: { revision: next.revision, saved_at: next.saved_at } }));
 }
 
-async function send(op: NonNullable<typeof failedOperation>): Promise<WorkspaceSnapshot> {
+async function send(op: NonNullable<typeof failedOperation>, checkpoint = false): Promise<WorkspaceSnapshot> {
   let next: WorkspaceSnapshot;
-  if (isDesktop()) next = await request('/api/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(op) });
+  if (isAndroid()) {
+    const ack = await NativeWorkspace.commit({ ...op, data: undefined, changes: workspaceDelta(snapshot!.data, op.data), settings: op.data.settings, ai_settings: op.data.ai_settings, checkpoint } as any);
+    next = { schema_version: 2, ...ack, data: op.data };
+  } else if (isDesktop()) next = await request('/api/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(op) });
   else {
     next = { schema_version: 2, revision: op.expected_revision + 1, operation_id: op.operation_id, saved_at: new Date().toISOString(), data: op.data };
     await writeBrowser(next, op.expected_revision);
@@ -211,8 +216,8 @@ export function commitWorkspace(change: (data: WorkspaceData, operationId: strin
     const operationId = crypto.randomUUID();
     const operation = { operation_id: operationId, expected_revision: current.revision, data: change(clone(current.data), operationId) };
     validateWorkspace({ ...current, data: operation.data });
-    try { localStorage.setItem(PENDING_KEY, JSON.stringify(operation)); } catch { /* Disk commit remains authoritative. */ }
-    try { return await send(operation); }
+    try { if (!isAndroid()) localStorage.setItem(PENDING_KEY, JSON.stringify(operation)); } catch { /* Disk commit remains authoritative. */ }
+    try { return await send(operation, checkpoint); }
     catch (error) {
       failedOperation = operation;
       blocked = error instanceof Error ? error : new Error('保存失败');

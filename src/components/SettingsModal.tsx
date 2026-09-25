@@ -1,3 +1,4 @@
+import { isAndroid } from '../services/native/platform';
 import { exportFullBackup, validateWorkspace, WorkspaceSnapshot, isDesktop, loadWorkspace } from '../services/durableStore';
 import React, { useState, useRef, useEffect } from 'react';
 import { TaskNode, AppSettings } from '../types/todo';
@@ -223,7 +224,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   ];
 
   const handleExport = async () => {
-    try { downloadJsonFile(await exportFullBackup()); }
+    try { await downloadJsonFile(await exportFullBackup()); }
     catch (error) { setImportError((error as Error).message); }
   };
 
@@ -231,6 +232,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 32 * 1024 * 1024) { setImportError("备份超过 32 MB，请拆分或使用桌面版恢复"); return; }
     const reader = new FileReader();
     reader.onload = async (event) => {
       const content = event.target?.result as string;
@@ -264,7 +266,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+    <div className="settings-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[85vh]">
         {/* Header */}
         <div className="p-5 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
@@ -824,8 +826,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
+              {isAndroid() && <p className="text-sm text-slate-600 bg-blue-50 p-3 rounded-lg">手机版首版支持手动复盘，不限制生成次数。关闭应用后暂不执行自动周报、月报。</p>}
               {/* Automated Schedule Plan (PRD 2.3) */}
-              <div className="border-t border-slate-100 pt-3 space-y-3">
+              <div hidden={isAndroid()} className="border-t border-slate-100 pt-3 space-y-3">
                 <div className="text-xs font-bold text-slate-800 flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-blue-600" />

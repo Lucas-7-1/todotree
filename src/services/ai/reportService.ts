@@ -1,3 +1,4 @@
+import { isAndroid } from '../native/platform';
 import { loadWorkspace, commitWorkspace } from '../durableStore';
 import {
   AISettings,
@@ -407,6 +408,7 @@ export async function requestReport(
   } = {}
 ): Promise<GenerateReportResult> {
   const source = options.source || 'manual';
+  if (isAndroid() && source === 'scheduled') throw new Error('手机版首版仅支持手动复盘');
   const reportKey = computeReportKey(facts);
 
   // 1. Template resolution

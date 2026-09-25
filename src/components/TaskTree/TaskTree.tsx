@@ -250,6 +250,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
   const batchRowProps = (task: TaskNode) => ({
     queuedCompletion: onBulkAction ? pendingIds.has(task.id) : undefined,
     onQueueCompletion: onBulkAction ? toggleQueued : undefined,
+    onLongPress: onBulkAction ? (id: string) => { if (pendingIds.size || busy) return; setSelectionMode(true); setSelectedIds(prev => new Set([...prev, id])); } : undefined,
     selectionMode, bulkSelected: selectedIds.has(task.id), onBulkSelect: toggleSelected,
   });
 
@@ -779,7 +780,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
   );
 
   return (
-    <div ref={treeContainer} className="flex-1 flex flex-col h-full bg-white select-none overflow-hidden relative">
+    <div ref={treeContainer} className="task-tree-workspace flex-1 flex flex-col h-full bg-white select-none overflow-hidden relative">
       {/* 1. Composite Task Filter Bar (PRD Section 1) */}
       <TaskFilterBar
         filterState={filterState}
@@ -926,7 +927,7 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
       {/* 3. Table Column Headers */}
       <div className="px-8 py-2 border-b border-slate-100 flex items-center justify-between text-xs text-slate-400 font-medium bg-slate-50/50 select-none">
         <div className="flex-1 pl-7">任务</div>
-        <div className="flex items-center gap-6 flex-shrink-0">
+        <div className="task-column-headings flex items-center gap-6 flex-shrink-0">
           <div className="w-20 text-center">截止时间</div>
           <div className="w-28 text-center">四象限</div>
           <div className="w-6" />

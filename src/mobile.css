@@ -1,0 +1,74 @@
+/* Mobile uses the same domain state and actions as desktop. No duplicated task model. */
+.mobile-navigation, .mobile-add-task, .mobile-more-backdrop { display: none; }
+@media (max-width: 767px) {
+  :root { --tree-indent: 12px; --mobile-nav-height: 60px; }
+  html, body, #root { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  .app-shell { height: 100dvh; width: 100%; padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px)); }
+  .main-workspace { height: 100%; }
+  .desktop-sidebar { display: none; }
+  .mobile-navigation { display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); background: white; border-top: 1px solid #e2e8f0; z-index: 35; }
+  .mobile-navigation button { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; color: #64748b; }
+  .mobile-navigation button[aria-current="page"] { color: #2563eb; background: #eff6ff; }
+  .mobile-more-backdrop { display: flex; align-items: flex-end; position: fixed; inset: 0; background: #0f172a55; z-index: 70; }
+  .mobile-more { width: 100%; background: white; border-radius: 24px 24px 0 0; padding: 24px 20px calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .mobile-more > button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 15px 8px; border-bottom: 1px solid #f1f5f9; }
+  .mobile-more > button span { margin-left: auto; color: #64748b; }
+  .workspace-header { padding: 8px 12px; min-height: 64px; gap: 8px; }
+  .workspace-header h1 { font-size: 20px; }
+  .workspace-header > div, .workspace-header > div > div { gap: 6px; }
+  .workspace-header button { min-height: 40px; padding: 8px; }
+  .workspace-header .desktop-template-button { display: none; }
+  .main-workspace .px-6, .main-workspace .px-8 { padding-left: 12px; padding-right: 12px; }
+  .task-tree-workspace > div:nth-of-type(2) { overflow-x: auto; flex-shrink: 0; }
+  .task-tree-workspace > div:nth-of-type(2) > div { gap: 8px; white-space: nowrap; }
+  .task-tree-workspace > div:nth-of-type(2) > span { display: none; }
+  .task-column-headings { display: none; }
+  [data-task-id] { min-height: 60px; padding-right: 4px; touch-action: pan-y; }
+  [data-task-id] [draggable] { display: none; }
+  [data-task-id] > div:first-of-type { gap: 5px; }
+  [data-task-id] button[title="原位添加子任务"] { min-width: 34px; min-height: 40px; }
+  [data-task-id] button[title="更多操作"] { width: 32px; height: 40px; }
+  [data-task-id] button[title="勾选完成"], [data-task-id] button[title="取消勾选"], [data-task-id] button[title="标记为未完成"] { width: 24px; height: 24px; }
+  [data-task-id] span[title^="背景说明"], [data-task-id] span[title^="备注"], [data-task-id] span[title^="重复规则"] { display: none; }
+  .task-row-meta { gap: 2px; }
+  .task-row-meta > div:first-child { display: none; }
+  .task-row-meta > div:nth-child(2) { width: auto; }
+  .task-row-meta > div:nth-child(2) button { width: 24px; min-height: 32px; padding: 4px; }
+  .task-row-meta > div:nth-child(2) button span:not(:first-child) { display: none; }
+  .task-row-meta > div:nth-child(2) button span:only-child { font-size: 0; width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
+  .quick-input-bar { padding: 8px 10px; }
+  .quick-input-box { height: auto; padding: 8px; }
+  .quick-input-fields { display: flex; flex-wrap: wrap; min-width: 0; gap: 6px; }
+  .quick-input-fields > div:first-child { display: none; }
+  .quick-input-fields > input { min-width: 0; flex: 1 1 calc(100% - 75px); height: 40px; }
+  .mobile-add-task { display: block; min-height: 40px; }
+  .quick-input-fields > .relative { flex: 1; }
+  .quick-input-fields > .relative > button { width: 100%; padding: 7px 5px; font-size: 11px; justify-content: center; }
+  .quick-input-fields > .relative > div { position: fixed; bottom: 160px; left: 12px; right: 12px; width: auto; max-height: 55dvh; overflow-y: auto; }
+  .quick-input-bar > .mt-2\.5 { display: none; }
+  .mobile-full-panel { position: fixed !important; inset: 0 !important; width: 100% !important; max-width: 100% !important; height: 100dvh !important; z-index: 50; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .settings-overlay { padding: 0; }
+  .settings-overlay > div { border-radius: 0; height: 100dvh; max-height: 100dvh; max-width: 100%; }
+  .settings-overlay .p-6 { padding: 16px; }
+  .quadrant-scroll { overflow-y: auto !important; padding: 12px !important; }
+  .quadrant-grid { grid-template-columns: 1fr !important; grid-template-rows: none !important; height: auto !important; gap: 12px; }
+  .quadrant-grid > div { min-height: 170px; max-height: 420px; }
+  .quadrant-workspace > div:first-child { flex-wrap: wrap; gap: 8px; padding: 10px; }
+  .review-workspace > div { padding: 12px; }
+  .review-workspace article { padding: 16px; overflow-wrap: anywhere; }
+  .review-workspace > div:first-child > div, .review-workspace > div:first-child > div > div { flex-wrap: wrap; }
+  .review-workspace > div:first-child select { max-width: 160px; }
+  .keyboard-open .mobile-navigation { display: none; }
+  .keyboard-open .app-shell { padding-bottom: 0; }
+  input, textarea, select { max-width: 100%; }
+  [role="toolbar"] { max-height: 36dvh; overflow-y: auto; }
+  [role="toolbar"] button { min-height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) { .mobile-full-panel { animation: none !important; } }
+
+@media (max-width: 767px) {
+  .task-toast { left: 10px; right: 10px; bottom: calc(70px + env(safe-area-inset-bottom, 0px)); padding: 12px; gap: 8px; flex-wrap: wrap; }
+  .task-toast button { min-height: 36px; }
+  [data-mobile-quadrant] { position: fixed !important; inset: 0 !important; width: 100% !important; max-width: 100% !important; z-index: 50; }
+  .task-tree-workspace > div:first-child > div { flex-wrap: wrap; }
+}

@@ -37,6 +37,7 @@ interface TaskItemRowProps {
   onQueueCompletion?: (id: string) => void;
   selectionMode?: boolean;
   bulkSelected?: boolean;
+  onLongPress?: (id: string) => void;
   onBulkSelect?: (id: string, range: boolean) => void;
   task: TaskNode;
   allTasks: TaskNode[];
@@ -68,7 +69,7 @@ interface TaskItemRowProps {
 }
 
 export const TaskItemRow: React.FC<TaskItemRowProps> = ({
-  queuedCompletion, onQueueCompletion, selectionMode = false, bulkSelected = false, onBulkSelect,
+  onLongPress, queuedCompletion, onQueueCompletion, selectionMode = false, bulkSelected = false, onBulkSelect,
   task,
   allTasks,
   level,
@@ -97,6 +98,9 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   matchSnippet,
   isContextOnly = false,
 }) => {
+  const touch = useRef<{ timer?: ReturnType<typeof setTimeout>; x: number; y: number; fired: boolean }>({ x: 0, y: 0, fired: false });
+  const cancelTouch = () => clearTimeout(touch.current.timer);
+  useEffect(() => () => cancelTouch(), []);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState(task.title);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -300,6 +304,14 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   return (
     <div
       data-task-id={task.id}
+      onTouchStart={e => {
+        if (!onLongPress || (e.target as HTMLElement).closest('button,input,textarea')) return;
+        cancelTouch(); const point = e.touches[0]; touch.current = { x: point.clientX, y: point.clientY, fired: false };
+        touch.current.timer = setTimeout(() => { touch.current.fired = true; onLongPress(task.id); }, 500);
+      }}
+      onTouchMove={e => { const p = e.touches[0]; if (Math.abs(p.clientX-touch.current.x)+Math.abs(p.clientY-touch.current.y)>12) cancelTouch(); }}
+      onTouchEnd={cancelTouch} onTouchCancel={cancelTouch}
+      onClickCapture={e => { if (touch.current.fired) { e.preventDefault(); e.stopPropagation(); touch.current.fired = false; } }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -324,7 +336,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
         dropIndicator === 'inside' ? 'bg-blue-100/50 !border-blue-400' : ''
       }`}
       style={{
-        paddingLeft: `${Math.max(12, level * 26)}px`,
+        paddingLeft: `max(8px, calc(${level} * var(--tree-indent, 26px)))`,
         transition:
           animPhase === 'exiting'
             ? 'transform 200ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms cubic-bezier(0.4, 0, 0.2, 1)'
@@ -336,7 +348,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
         <div
           className="absolute border-l border-b border-slate-200 pointer-events-none rounded-bl-sm"
           style={{
-            left: `${(level - 1) * 26 + 2}px`,
+            left: `calc(${level-1} * var(--tree-indent, 26px) + 2px)`,
             top: 0,
             width: '14px',
             height: '50%',
@@ -571,7 +583,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
       </div>
 
       {/* Right Meta Columns */}
-      <div className="flex items-center gap-6 flex-shrink-0">
+      <div className="task-row-meta flex items-center gap-6 flex-shrink-0">
         {/* Deadline Column */}
         <div className="w-20 text-center">
           {dateInfo.label !== '-' ? (

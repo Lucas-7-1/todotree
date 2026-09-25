@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TodoTree</string>
+    <string name="title_activity_main">TodoTree</string>
+    <string name="package_name">com.lucas.todotree</string>
+    <string name="custom_url_scheme">com.lucas.todotree</string>
+</resources>

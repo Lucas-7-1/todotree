@@ -364,7 +364,7 @@ export const QuadrantPanel: React.FC<QuadrantPanelProps> = ({
   const isUnclassifiedDragTarget = dragOverQuadrant === 'null';
 
   const panelContent = (
-    <aside
+    <aside data-mobile-quadrant="true"
       className={`h-screen bg-white border-l border-slate-200/90 flex flex-col p-4 select-none overflow-hidden ${
         isDrawer
           ? 'fixed inset-y-0 right-0 z-50 shadow-2xl animate-in slide-in-from-right duration-200'

@@ -445,7 +445,7 @@ export const QuadrantWorkspace: React.FC<QuadrantWorkspaceProps> = ({
   const isUnclassifiedDragTarget = dragOverZone === 'unclassified';
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#f8fafc]">
+    <div className="quadrant-workspace flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#f8fafc]">
       {/* 1. Top Global Toolbar spanning full width */}
       <div className="px-6 py-3 bg-white border-b border-slate-200/80 flex items-center justify-between flex-shrink-0 select-none">
         <div className="flex items-center gap-4">
@@ -654,9 +654,9 @@ export const QuadrantWorkspace: React.FC<QuadrantWorkspaceProps> = ({
         )}
 
         {/* Right: 2x2 Four Quadrants Matrix spanning remaining space */}
-        <div className="flex-1 h-full min-h-0 p-4 overflow-hidden">
+        <div className="quadrant-scroll flex-1 h-full min-h-0 p-4 overflow-hidden">
           <div
-            className="grid grid-cols-2 gap-3.5 h-full min-h-0"
+            className="quadrant-grid grid grid-cols-2 gap-3.5 h-full min-h-0"
             style={{ gridTemplateRows: 'minmax(0, 1fr) minmax(0, 1fr)' }}
           >
             {/* Top-Left: Q1 重要且紧急 */}

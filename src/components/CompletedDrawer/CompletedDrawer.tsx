@@ -150,7 +150,7 @@ export const CompletedDrawer: React.FC<CompletedDrawerProps> = ({
   };
 
   return (
-    <aside className="w-[420px] max-w-full h-screen flex-shrink-0 bg-white border-l border-slate-200/90 flex flex-col z-40 shadow-2xl select-none animate-in slide-in-from-right duration-200">
+    <aside className="mobile-full-panel w-[420px] max-w-full h-screen flex-shrink-0 bg-white border-l border-slate-200/90 flex flex-col z-40 shadow-2xl select-none animate-in slide-in-from-right duration-200">
       {/* Drawer Header */}
       <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
         <div className="flex items-center gap-2.5">

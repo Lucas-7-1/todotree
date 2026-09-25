@@ -1,3 +1,5 @@
+import { isAndroid } from './services/native/platform';
+import { App as NativeApp } from '@capacitor/app';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Sparkles } from 'lucide-react';
 import {
@@ -74,7 +76,7 @@ export const App: React.FC = () => {
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
   const [settings, setSettings] = useState<AppSettings>(loadSettingsFromStorage());
-  const [currentView, setCurrentView] = useState<ViewType>('tree');
+  const [currentView, setCurrentView] = useState<ViewType>(isAndroid() ? 'today' : 'tree');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [quickInputParentId, setQuickInputParentId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1315,12 +1317,27 @@ export const App: React.FC = () => {
     ? tasks.find((t) => t.id === selectedTaskId) || null
     : null;
 
+  useEffect(() => {
+    if (!isAndroid()) return;
+    const back = async () => {
+      if (isSettingsModalOpen) { setIsSettingsModalOpen(false); return; }
+      if (isCreateModalOpen) { setIsCreateModalOpen(false); return; }
+      if (isTemplateModalOpen) { setIsTemplateModalOpen(false); return; }
+      if (auxiliaryPanel.type !== 'none') { closeAuxiliaryPanel(); return; }
+      if (pendingNavigationGuard.current && !(await pendingNavigationGuard.current())) return;
+      if (currentView !== 'today') { setCurrentView('today'); return; }
+      await NativeApp.minimizeApp();
+    };
+    window.addEventListener('todotree:navigate-back', back);
+    return () => window.removeEventListener('todotree:navigate-back', back);
+  }, [isSettingsModalOpen, isCreateModalOpen, isTemplateModalOpen, auxiliaryPanel.type, currentView]);
+
   const quickInputParent = quickInputParentId
     ? tasks.find((t) => t.id === quickInputParentId) || null
     : null;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#f8fafc] text-slate-800">
+    <div className="app-shell flex h-screen w-screen overflow-hidden bg-[#f8fafc] text-slate-800">
       {/* 1. Left Sidebar */}
       <Sidebar
         currentView={currentView}
@@ -1347,7 +1364,7 @@ export const App: React.FC = () => {
       />
 
       {/* 2. Middle Main Workspace */}
-      <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden relative">
+      <main className="main-workspace flex-1 flex flex-col min-w-0 h-screen overflow-hidden relative">
         {/* Reconnection Alert Banner (Bounded Auto-Recovery & Diagnostic actions) */}
         {isServerDisconnected && (
           <div

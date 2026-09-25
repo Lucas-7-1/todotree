@@ -1,3 +1,4 @@
+import { downloadTextFile } from '../../services/importExport';
 import React, { useState, useEffect, useMemo } from 'react';
 import { TaskNode } from '../../types/todo';
 import {
@@ -401,22 +402,15 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
   };
 
   // Export Markdown handler
-  const handleExportMarkdown = () => {
+  const handleExportMarkdown = async () => {
     if (!activeReport || !latestVersion) return;
     const content = latestVersion.response.report_markdown;
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${activeReport.title}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try { await downloadTextFile(content, `${activeReport.title}.md`, 'text/markdown'); }
+    catch(e) { setErrorMessage((e as Error).message); }
   };
 
   // Export Diagnostics handler
-  const handleExportDiagnostics = (report: SavedReport, version: ReportVersion) => {
+  const handleExportDiagnostics = async (report: SavedReport, version: ReportVersion) => {
     const diagnostic = {
       app: 'TodoTree',
       version: '1.4',
@@ -438,15 +432,8 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
       sanitized_task_ids: report.facts.completed_records.map((r) => r.instance_id),
     };
     const jsonStr = JSON.stringify(diagnostic, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `todotree-diagnostic-${report.id}-${Date.now()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try { await downloadTextFile(jsonStr, `todotree-diagnostic-${report.id}-${Date.now()}.json`, 'application/json'); }
+    catch(e) { setErrorMessage((e as Error).message); }
   };
 
   // Compute Single Primary Action Button text, icon, and behavior (PRD Section 3.2 P0)
@@ -499,7 +486,7 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
   const primaryBtn = getPrimaryButtonProps();
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-[#f8fafc] overflow-y-auto">
+    <div className="review-workspace flex-1 flex flex-col min-w-0 bg-[#f8fafc] overflow-y-auto">
       {/* 1. Compact 1-2 Row Control Console Toolbar (PRD Section 3.2) */}
       <div className="bg-white border-b border-slate-200/80 px-6 py-2.5 flex-shrink-0 select-none shadow-2xs space-y-2">
         {/* Row 1: Periods, Scope, Templates & Quick Actions */}

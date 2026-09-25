@@ -1,3 +1,4 @@
+import { isAndroid } from './native/platform';
 import { TaskNode, AppSettings } from '../types/todo';
 
 import { loadWorkspace, commitWorkspace } from './durableStore';
@@ -36,6 +37,7 @@ const CURRENT_TAB_ID = 'tab_' + Math.random().toString(36).substring(2, 9);
 let isCurrentTabOwner = true;
 
 export function initTabLock(onLockChange: (isOwner: boolean) => void): () => void {
+  if (isAndroid()) { onLockChange(true); return () => {}; }
   const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('todotree_tab_channel') : null;
 
   const claimLock = () => {

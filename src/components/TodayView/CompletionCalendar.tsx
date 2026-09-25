@@ -49,19 +49,11 @@ export const CompletionCalendar: React.FC<CompletionCalendarProps> = ({
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load events once and on mount
   useEffect(() => {
-    let isMounted = true;
-    setIsLoading(true);
-    loadEventsFromStorage().then((data) => {
-      if (isMounted) {
-        setEvents(data);
-        setIsLoading(false);
-      }
-    });
-    return () => {
-      isMounted = false;
-    };
+    let mounted = true;
+    const reload = () => { void loadEventsFromStorage().then(data => { if (mounted) { setEvents(data); setIsLoading(false); } }).catch(() => { if (mounted) setIsLoading(false); }); };
+    reload(); window.addEventListener('todotree:persisted', reload);
+    return () => { mounted = false; window.removeEventListener('todotree:persisted', reload); };
   }, []);
 
   // Root projects for filter

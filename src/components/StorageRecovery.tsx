@@ -26,11 +26,11 @@ export function StorageRecovery({ message, onRetry }: { message: string; onRetry
       <div className="flex gap-3 flex-wrap">
         <button disabled={busy} onClick={() => run(onRetry)} className="px-3 py-2 bg-blue-600 text-white rounded">重试保存</button>
         <button onClick={() => window.location.reload()} className="px-3 py-2 border rounded">重新读取</button>
-        <button onClick={() => {
+        <button onClick={() => run(async () => {
           const pending = getRecoveryCopy();
           if (pending) { const data = JSON.parse(JSON.stringify(pending.data)); delete data.ai_settings.api_key;
-            downloadJsonFile(JSON.stringify({ schema_version: 2, revision: pending.expected_revision, operation_id: pending.operation_id, saved_at: new Date().toISOString(), data }), 'TodoTree-Recovery.json'); }
-        }} disabled={!getRecoveryCopy()} className="px-3 py-2 border rounded">导出待恢复副本</button>
+            await downloadJsonFile(JSON.stringify({ schema_version: 2, revision: pending.expected_revision, operation_id: pending.operation_id, saved_at: new Date().toISOString(), data }), 'TodoTree-Recovery.json'); }
+        })} disabled={!getRecoveryCopy()} className="px-3 py-2 border rounded">导出待恢复副本</button>
         {isDesktop() && <button onClick={() => fetch('/api/open-data-dir', { method: 'POST' }).catch(() => {})}>打开数据目录</button>}
       </div>
       {getRecoveryCopy() && <button className="text-amber-700" onClick={() => {
