@@ -102,7 +102,7 @@ export const CompletionCalendar: React.FC<CompletionCalendarProps> = ({
   const weekDays = ['一', '二', '三', '四', '五', '六', '日'];
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden select-none">
+    <div className="completion-calendar flex-1 flex flex-col min-h-0 bg-white overflow-hidden select-none">
       {/* 1. Calendar Header & Controls */}
       <div className="py-3 px-6 border-b border-slate-200/80 flex items-center justify-between flex-wrap gap-3 bg-white flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -156,9 +156,9 @@ export const CompletionCalendar: React.FC<CompletionCalendarProps> = ({
       </div>
 
       {/* 2. Main Content Split: Left Month Calendar (~60%), Right Day Details (~40%) */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
+      <div className="calendar-layout flex-1 flex min-h-0 overflow-hidden">
         {/* Left: 42-cell Calendar Grid */}
-        <div className="flex-1 flex flex-col min-w-0 border-r border-slate-200 overflow-y-auto p-4">
+        <div className="calendar-month flex-1 flex flex-col min-w-0 border-r border-slate-200 overflow-y-auto p-4">
           {/* Weekday Bar */}
           <div className="grid grid-cols-7 gap-1.5 mb-2 text-center text-xs font-semibold text-slate-400">
             {weekDays.map((w, idx) => (
@@ -169,7 +169,7 @@ export const CompletionCalendar: React.FC<CompletionCalendarProps> = ({
           </div>
 
           {/* 42 Cells Grid */}
-          <div className="grid grid-cols-7 gap-1.5 flex-1 min-h-0">
+          <div className="calendar-days grid grid-cols-7 gap-1.5 flex-1 min-h-0">
             {gridCells.map((cell) => {
               const isSelected = cell.dateStr === selectedDateStr;
               const hasCompletions = cell.leafCompletedCount > 0 || cell.branchClosureCount > 0;
@@ -243,7 +243,7 @@ export const CompletionCalendar: React.FC<CompletionCalendarProps> = ({
         </div>
 
         {/* Right: Selected Day Detailed List (~40%) */}
-        <div className="w-[380px] lg:w-[420px] flex-shrink-0 flex flex-col min-h-0 bg-slate-50/50">
+        <div className="calendar-day-detail w-[380px] lg:w-[420px] flex-shrink-0 flex flex-col min-h-0 bg-slate-50/50">
           {/* Day Heading */}
           <div className="p-4 border-b border-slate-200/80 bg-white flex items-center justify-between flex-shrink-0">
             <div>

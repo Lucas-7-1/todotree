@@ -1512,6 +1512,7 @@ export const App: React.FC = () => {
 
           {currentView === 'today' && (
             <TodayView
+              onOpenTaskTree={() => setCurrentView('tree')}
               tasks={tasks}
               timezone={settings.timezone}
               onToggleComplete={handleToggleComplete}

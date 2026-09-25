@@ -1,16 +1,25 @@
+/* Capacitor 8 supplies CSS insets; a WebView already inset natively reports zero. */
+:root {
+  --app-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --app-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --app-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+  --app-safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+}
+.app-shell { padding-top: var(--app-safe-top); padding-left: var(--app-safe-left); padding-right: var(--app-safe-right); background: white; }
+.app-shell > .fixed.inset-0 { top: var(--app-safe-top); bottom: var(--app-safe-bottom); }
 /* Mobile uses the same domain state and actions as desktop. No duplicated task model. */
 .mobile-navigation, .mobile-add-task, .mobile-more-backdrop { display: none; }
 @media (max-width: 767px) {
   :root { --tree-indent: 12px; --mobile-nav-height: 60px; }
   html, body, #root { height: 100%; overflow: hidden; overscroll-behavior: none; }
-  .app-shell { height: 100dvh; width: 100%; padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px)); }
+  .app-shell { height: 100dvh; width: 100%; padding-bottom: calc(var(--mobile-nav-height) + var(--app-safe-bottom)); }
   .main-workspace { height: 100%; }
   .desktop-sidebar { display: none; }
-  .mobile-navigation { display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); background: white; border-top: 1px solid #e2e8f0; z-index: 35; }
+  .mobile-navigation { display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: calc(var(--mobile-nav-height) + var(--app-safe-bottom)); padding-bottom: var(--app-safe-bottom); background: white; border-top: 1px solid #e2e8f0; z-index: 35; }
   .mobile-navigation button { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; color: #64748b; }
   .mobile-navigation button[aria-current="page"] { color: #2563eb; background: #eff6ff; }
   .mobile-more-backdrop { display: flex; align-items: flex-end; position: fixed; inset: 0; background: #0f172a55; z-index: 70; }
-  .mobile-more { width: 100%; background: white; border-radius: 24px 24px 0 0; padding: 24px 20px calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .mobile-more { width: 100%; background: white; border-radius: 24px 24px 0 0; padding: 24px 20px calc(24px + var(--app-safe-bottom)); }
   .mobile-more > button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 15px 8px; border-bottom: 1px solid #f1f5f9; }
   .mobile-more > button span { margin-left: auto; color: #64748b; }
   .workspace-header { padding: 8px 12px; min-height: 64px; gap: 8px; }
@@ -46,7 +55,7 @@
   .quick-input-fields > .relative > button { width: 100%; padding: 7px 5px; font-size: 11px; justify-content: center; }
   .quick-input-fields > .relative > div { position: fixed; bottom: 160px; left: 12px; right: 12px; width: auto; max-height: 55dvh; overflow-y: auto; }
   .quick-input-bar > .mt-2\.5 { display: none; }
-  .mobile-full-panel { position: fixed !important; inset: 0 !important; width: 100% !important; max-width: 100% !important; height: 100dvh !important; z-index: 50; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .mobile-full-panel { position: fixed !important; inset: 0 !important; width: 100% !important; max-width: 100% !important; height: 100dvh !important; z-index: 50; padding-bottom: var(--app-safe-bottom); }
   .settings-overlay { padding: 0; }
   .settings-overlay > div { border-radius: 0; height: 100dvh; max-height: 100dvh; max-width: 100%; }
   .settings-overlay .p-6 { padding: 16px; }
@@ -67,8 +76,61 @@
 @media (prefers-reduced-motion: reduce) { .mobile-full-panel { animation: none !important; } }
 
 @media (max-width: 767px) {
-  .task-toast { left: 10px; right: 10px; bottom: calc(70px + env(safe-area-inset-bottom, 0px)); padding: 12px; gap: 8px; flex-wrap: wrap; }
+  .task-toast { left: 10px; right: 10px; bottom: calc(70px + var(--app-safe-bottom)); padding: 12px; gap: 8px; flex-wrap: wrap; }
   .task-toast button { min-height: 36px; }
   [data-mobile-quadrant] { position: fixed !important; inset: 0 !important; width: 100% !important; max-width: 100% !important; z-index: 50; }
   .task-tree-workspace > div:first-child > div { flex-wrap: wrap; }
+}
+
+@media (max-width: 767px) {
+  .workspace-header { flex-shrink: 0; max-height: none; min-height: 72px; padding: 10px 16px; }
+  .header-heading { min-width: 0; }
+  .header-title-line { flex-wrap: wrap; }
+  .workspace-header h1 { font-size: 22px; line-height: 1.25; }
+  .header-actions { flex-shrink: 0; }
+  .header-undo { width: 40px; justify-content: center; }
+  .header-undo span { display: none; }
+  .workspace-header button { min-height: 44px; }
+  .mobile-navigation { left: var(--app-safe-left); right: var(--app-safe-right); }
+  .mobile-full-panel, [data-mobile-quadrant] {
+    top: var(--app-safe-top) !important;
+    bottom: var(--app-safe-bottom) !important;
+    left: var(--app-safe-left) !important;
+    right: var(--app-safe-right) !important;
+    width: auto !important;
+    height: calc(100dvh - var(--app-safe-top) - var(--app-safe-bottom)) !important;
+    padding-bottom: 0;
+  }
+  .settings-overlay > div { height: 100%; max-height: 100%; }
+  .today-toolbar { padding: 8px 16px 12px; border-bottom: 0; }
+  .today-tabs { width: 100%; gap: 4px; border-radius: 12px; background: #f1f5f9; padding: 4px; }
+  .today-tabs button { flex: 1; min-width: 0; min-height: 44px; justify-content: center; padding: 8px 4px; border: 0; border-radius: 9px; font-size: 13px; }
+  .today-tabs button[aria-pressed="true"] { background: white; box-shadow: 0 1px 3px #0f172a12; }
+  .today-history-entry { display: none; }
+  .today-content { padding: 4px 16px 20px; }
+  .today-summary { display: block; padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .today-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; }
+  .today-stats > span { display: none; }
+  .today-stats > div, .today-stats > button { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-height: 76px; padding: 10px 4px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; text-align: center; font-size: 12px; }
+  .today-stats strong { font-size: 24px; line-height: 1.2; }
+  .today-summary > button { margin-top: 10px; min-height: 40px; }
+  .today-empty { padding: 40px 8px 24px; }
+  .today-empty > p:first-of-type { font-size: 15px; line-height: 1.6; }
+  .today-empty > p:last-of-type { font-size: 13px; line-height: 1.7; max-width: 260px; margin: 8px auto 0; }
+  .today-plan-button { min-height: 44px; margin-top: 20px !important; }
+  .today-task-row { min-height: 60px; gap: 8px; flex-wrap: wrap; }
+  .today-task-row > div:first-child { flex-basis: 100%; }
+  .today-task-row > div:first-child > button { width: 28px; height: 28px; }
+  .today-task-row > div:first-child > div { font-size: 14px; }
+  .today-task-row > div:last-child { margin-left: 38px; }
+  .today-remove-action { opacity: 1; min-height: 36px; }
+  .calendar-layout { flex-direction: column; overflow-y: auto; display: block; }
+  .calendar-month { overflow: visible; border-right: 0; padding: 12px; }
+  .calendar-days { gap: 4px; flex: none; }
+  .calendar-days > div { min-width: 0; min-height: 58px; padding: 5px; border-radius: 8px; }
+  .calendar-days > div > div:first-child { flex-wrap: wrap; gap: 4px; }
+  .calendar-days > div > div:first-child > div { flex-wrap: wrap; gap: 1px; }
+  .calendar-days > div > div:last-child { display: none; }
+  .calendar-day-detail { width: 100%; border-top: 1px solid #e2e8f0; }
+  .calendar-day-detail > div:last-child { overflow: visible; }
 }

@@ -31,6 +31,7 @@ interface TodayViewProps {
   onUpdateTask: (id: string, updates: Partial<TaskNode>) => void;
   onOpenCompletedDrawer?: () => void;
   initialTab?: 'execution' | 'calendar';
+  onOpenTaskTree?: () => void;
 }
 
 export const TodayView: React.FC<TodayViewProps> = ({
@@ -42,6 +43,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
   onUpdateTask,
   onOpenCompletedDrawer,
   initialTab = 'execution',
+  onOpenTaskTree,
 }) => {
   const [activeTab, setActiveTab] = useState<'execution' | 'calendar'>(initialTab);
   const [showPreviousPlanned, setShowPreviousPlanned] = useState(false);
@@ -128,7 +130,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
       <div
         key={task.id}
         onClick={() => onSelectTask(task)}
-        className="group bg-white hover:bg-slate-50/80 rounded-lg px-3 py-2 border border-slate-200/80 transition-colors flex items-center justify-between gap-3 cursor-pointer shadow-2xs"
+        className="today-task-row group bg-white hover:bg-slate-50/80 rounded-lg px-3 py-2 border border-slate-200/80 transition-colors flex items-center justify-between gap-3 cursor-pointer shadow-2xs"
       >
         <div className="flex items-center gap-2.5 flex-1 min-w-0">
           {/* Checkbox */}
@@ -193,7 +195,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
                 e.stopPropagation();
                 handleRemoveFromToday(task);
               }}
-              className="opacity-0 group-hover:opacity-100 text-[10px] text-slate-400 hover:text-red-600 px-1 transition-opacity"
+              className="today-remove-action opacity-0 group-hover:opacity-100 text-[10px] text-slate-400 hover:text-red-600 px-1 transition-opacity"
               title="移出今天安排"
             >
               移出
@@ -205,12 +207,13 @@ export const TodayView: React.FC<TodayViewProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden">
+    <div className="today-view flex-1 flex flex-col min-h-0 bg-white overflow-hidden">
       {/* 1. Header Toolbar with Unified Tabs */}
-      <div className="px-6 pt-3 border-b border-slate-200/80 flex items-center justify-between bg-white flex-shrink-0">
-        <div className="flex items-center gap-6">
+      <div className="today-toolbar px-6 pt-3 border-b border-slate-200/80 flex items-center justify-between bg-white flex-shrink-0">
+        <div className="today-tabs flex items-center gap-6">
           <button
             onClick={() => setActiveTab('execution')}
+            aria-pressed={activeTab === 'execution'}
             className={`pb-3 text-xs font-bold border-b-2 flex items-center gap-2 transition-colors ${
               activeTab === 'execution'
                 ? 'border-blue-600 text-blue-600'
@@ -228,6 +231,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
 
           <button
             onClick={() => setActiveTab('calendar')}
+            aria-pressed={activeTab === 'calendar'}
             className={`pb-3 text-xs font-bold border-b-2 flex items-center gap-2 transition-colors ${
               activeTab === 'calendar'
                 ? 'border-blue-600 text-blue-600'
@@ -243,7 +247,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
         {onOpenCompletedDrawer && (
           <button
             onClick={onOpenCompletedDrawer}
-            className="mb-2 flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200/80 rounded-lg transition-colors border border-slate-200/60"
+            className="today-history-entry mb-2 flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200/80 rounded-lg transition-colors border border-slate-200/60"
             title="查看已完成历史抽屉"
           >
             <Check className="w-3.5 h-3.5 text-blue-600" />
@@ -262,19 +266,19 @@ export const TodayView: React.FC<TodayViewProps> = ({
         />
       ) : (
         /* Tab 1: 今日执行 */
-        <div className="flex-1 overflow-y-auto p-6 max-w-4xl w-full mx-auto space-y-5">
+        <div className="today-content flex-1 overflow-y-auto p-6 max-w-4xl w-full mx-auto space-y-5">
           {/* Top Compact Summary Bar (PRD 2.5: 待处理 N · 已完成 N · 已逾期 N) */}
-          <div className="bg-slate-50 border border-slate-200/80 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs shadow-2xs">
-            <div className="flex items-center gap-4 text-slate-600 font-medium">
+          <div className="today-summary bg-slate-50 border border-slate-200/80 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs shadow-2xs">
+            <div className="today-stats flex items-center gap-4 text-slate-600 font-medium">
               <div>
                 <span>待处理 </span>
                 <strong className="text-slate-900 font-bold">{totalTodayTasks}</strong>
               </div>
               <span className="text-slate-300">·</span>
               <button
-                onClick={() => setActiveTab('calendar')}
+                onClick={() => onOpenCompletedDrawer ? onOpenCompletedDrawer() : setActiveTab('calendar')}
                 className="hover:text-blue-600 hover:underline flex items-center gap-1"
-                title="点击切换到完成日历查看详情"
+                title="查看已完成任务"
               >
                 <span>已完成 </span>
                 <strong className="text-emerald-600 font-bold">{todayCompletedTasks.length}</strong>
@@ -342,14 +346,15 @@ export const TodayView: React.FC<TodayViewProps> = ({
               </div>
             ) : (
               /* Clean normal empty state */
-              <div className="py-16 text-center space-y-2">
+              <div className="today-empty py-16 text-center space-y-2">
                 <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
                   <Inbox className="w-6 h-6" />
                 </div>
                 <p className="text-xs font-semibold text-slate-700">今天没有需要处理的待办任务</p>
                 <p className="text-[11px] text-slate-400">
-                  可以从「全部任务」树中主动将任务「加入今天」进行聚焦
+                  去任务列表选几件事，加入今天开始处理。
                 </p>
+                {onOpenTaskTree && <button onClick={onOpenTaskTree} className="today-plan-button mt-4 px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold">去安排任务</button>}
               </div>
             )
           ) : (

@@ -35,17 +35,22 @@ jobs:
       - name: Android storage integration test
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 36
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: cd android && ./gradlew :app:connectedDebugAndroidTest --no-daemon
+          script: |
+            cd android && ./gradlew :app:connectedDebugAndroidTest --no-daemon
+            mkdir -p "$GITHUB_WORKSPACE/android/app/build/outputs/mobile-ui"
+            adb pull /sdcard/Android/data/com.lucas.todotree/files/screenshots "$GITHUB_WORKSPACE/android/app/build/outputs/mobile-ui"
       - name: Preserve Android test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: TodoTree-Android-tests-${{ github.run_number }}
-          path: android/app/build/reports/androidTests/connected/**
+          path: |
+            android/app/build/reports/androidTests/connected/**
+            android/app/build/outputs/mobile-ui/**
           if-no-files-found: ignore
           retention-days: 14
       - uses: actions/upload-artifact@v4
