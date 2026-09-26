@@ -508,6 +508,7 @@ test('PRD Section 4.1: Quadrant width calculation formulas and drawer mode thres
 });
 
 // Mobile execution and project views share the same real lifecycle actions.
+import { applyTaskMove, validateTaskMove, visibleMobileTree } from '../src/services/taskMove';
 import { MobileWorkspace } from '../src/components/Mobile/MobileWorkspace';
 import { selectMobileToday, createTaskRecord } from '../src/services/mobileTasks';
 import { formatDateInTimezone } from '../src/services/calendarService';
@@ -515,7 +516,7 @@ import { ViewType } from '../src/types/todo';
 let mobileLatest: TaskNode[] = [];
 function MobileHarness({initial,view='today',reject=false}:{initial:TaskNode[];view?:ViewType;reject?:boolean}) {
   const [tasks,setTasks]=useState(initial);const [current,setView]=useState(view);mobileLatest=tasks;
-  return <MobileWorkspace tasks={tasks} view={current} timezone="Asia/Shanghai" saveStatus="saved" disabled={false} overlayOpen={false}
+  return <MobileWorkspace onMove={async move => { if (reject) return false; setTasks(old => applyTaskMove(old, move)); return true; }} tasks={tasks} view={current} timezone="Asia/Shanghai" saveStatus="saved" disabled={false} overlayOpen={false}
     onCreate={async input=>{if(reject)return false;setTasks(previous=>insertTaskNode(previous,createTaskRecord(input,formatDateInTimezone(new Date(),'Asia/Shanghai'))));return true;}}
     onBulk={async(ids,action)=>{if(reject)return false;setTasks(previous=>applyBulkAction(previous,ids,action).tasks);return true;}}
     onSelect={()=>{}} onRestore={t=>setTasks(previous=>reopenTaskBranch(previous,t.id))} onArchive={t=>setTasks(previous=>archiveCompletedBranch(previous,t.id).tasks)}
@@ -523,6 +524,7 @@ function MobileHarness({initial,view='today',reject=false}:{initial:TaskNode[];v
 }
 async function mountMobile(initial:TaskNode[],view:ViewType='today',reject=false){const host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(()=>root!.render(<MobileHarness initial={initial} view={view} reject={reject}/>));}
 async function mobileType(value:string){const el=document.querySelector('.m-composer input') as HTMLInputElement;assert.ok(el);await act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}));});}
+async function inlineMobileType(value: string) { const el = document.querySelector('[aria-label="子任务名称"]') as HTMLInputElement; assert.ok(el); await act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(el,value); el.dispatchEvent(new Event('input',{bubbles:true})); }); }
 const mobileDay=()=>formatDateInTimezone(new Date(),'Asia/Shanghai');
 test('mobile today separates planning from deadlines, deduplicates and uses configured timezone',()=>{
   const items=[{...task('due'),due_type:'datetime' as const,due_at:'2026-09-25T17:00:00Z'}, {...task('both'),planned_date:'2026-09-26',due_type:'date' as const,due_date:'2026-09-26'}, {...task('old'),planned_date:'2026-09-25'}, {...task('overdue-planned'),planned_date:'2026-09-26',due_type:'date' as const,due_date:'2026-09-24'}, {...task('priority-only'),quadrant:'Q1' as const}];
@@ -533,8 +535,8 @@ test('mobile title-only capture plans today without deadline or priority, failur
   await act(()=>root!.unmount());root=undefined;document.body.innerHTML='';await mountMobile([],'today',true);await mobileType('失败也保留');await click(document.querySelector('[aria-label="保存任务"]'));assert.equal((document.querySelector('.m-composer input') as HTMLInputElement).value,'失败也保留');assert.equal(mobileLatest.length,0);
 });
 test('mobile can create first child and first grandchild without existing children',async()=>{
-  await mountMobile([task('root')],'tree');await click(document.querySelector('[aria-label="更多操作 root"]'));await button('添加子任务');await mobileType('child');await click(document.querySelector('[aria-label="保存任务"]'));assert.equal(mobileLatest.find(t=>t.title==='child')?.parent_id,'root');
-  await click(document.querySelector('[aria-label="更多操作 child"]'));await button('添加子任务');await mobileType('grandchild');await click(document.querySelector('[aria-label="保存任务"]'));assert.equal(mobileLatest.find(t=>t.title==='grandchild')?.parent_id,mobileLatest.find(t=>t.title==='child')?.id);assert.equal(mobileLatest.find(t=>t.title==='child')?.planned_date,null);
+  await mountMobile([task('root')],'tree');await click(document.querySelector('[aria-label="更多操作 root"]'));await button('添加子任务');await inlineMobileType('child');await button('添加');assert.equal(mobileLatest.find(t=>t.title==='child')?.parent_id,'root');
+  await click(document.querySelector('[aria-label="更多操作 child"]'));await button('添加子任务');await inlineMobileType('grandchild');await button('添加');assert.equal(mobileLatest.find(t=>t.title==='grandchild')?.parent_id,mobileLatest.find(t=>t.title==='child')?.id);assert.equal(mobileLatest.find(t=>t.title==='child')?.planned_date,null);
 });
 test('mobile queues multiple checks; today removal does not archive a completed branch with open sibling',async()=>{
   const items=[task('root'),task('branch','root'),task('other','root'),{...task('a','branch'),planned_date:mobileDay()},{...task('b','branch'),planned_date:mobileDay()}];await mountMobile(items);
@@ -546,4 +548,109 @@ test('mobile failed batch keeps confirmation and cancelling plan still shows due
 });
 test('mobile Chinese IME Enter does not create and a 10000-root list renders bounded rows',async()=>{
   await mountMobile(Array.from({length:10000},(_,i)=>task('r'+i)),'tree');assert.equal(document.querySelectorAll('.m-task').length,50);await mobileType('组词');const el=document.querySelector('.m-composer input')!;await act(()=>el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true})));assert.equal(mobileLatest.length,10000);
+});
+
+test('structure move persists sibling rank, keeps completed rows in manual order and preserves subtree identity', () => {
+  const before = [task('root'), {...task('a','root','done'),sort_order:10}, {...task('b','root'),sort_order:20},task('child','b')];
+  const after = applyTaskMove(before,{taskId:'b',parentId:'root',anchorId:'a',placement:'before'});
+  assert.deepEqual(visibleMobileTree(after,'root',new Set(['b'])).map(r=>r.task.id),['b','child','a']);
+  assert.strictEqual(get(after,'child'),get(before,'child'));
+  assert.strictEqual(get(after,'a'),get(before,'a'));
+  assert.equal(get(after,'root').status,'open');
+  assert.deepEqual(visibleMobileTree(JSON.parse(JSON.stringify(after)),'root',new Set()).map(r=>r.task.id),['b','a']);
+});
+test('move last open child out, or sole child out, never completes the old parent', () => {
+  const before=[task('root'),task('a','root'),task('b','root'),task('done','a','done'),task('open','a')];
+  const after=applyTaskMove(before,{taskId:'open',parentId:'b',placement:'end'});
+  assert.equal(get(after,'a').status,'open');assert.equal(get(after,'a').archived_at,null);
+  assert.equal(get(after,'done').completed_at,timestamp);
+  const empty=applyTaskMove(after,{taskId:'open',parentId:'root',anchorId:'b',placement:'after'});
+  assert.equal(get(empty,'b').status,'open');assert.equal(get(empty,'open').parent_id,'root');
+  const confirmed=completeTaskBranch(empty,'a').tasks;
+  assert.equal(get(confirmed,'a').status,'done');assert.equal(get(confirmed,'a').archived_at,null);
+  assert.equal(get(confirmed,'root').status,'open');
+});
+test('move rejects hidden-descendant cycles, full-subtree depth, completed targets and stale anchors', () => {
+  const tasks=[task('r'),task('a','r'),task('b','a'),task('c','b'),task('d','c'),task('z'),task('zz','z'),task('done',null,'done')];
+  for(const move of [
+    {taskId:'a',parentId:'d',placement:'end' as const},
+    {taskId:'z',parentId:'c',placement:'end' as const},
+    {taskId:'z',parentId:'done',placement:'end' as const},
+    {taskId:'z',parentId:'r',anchorId:'c',placement:'before' as const},
+    {taskId:'a',parentId:null,placement:'end' as const,expectedParentId:'other'},
+  ]) assert.ok(validateTaskMove(tasks,move));
+  assert.equal(validateTaskMove(tasks,{taskId:'z',parentId:'b',placement:'end'}),null);
+});
+test('move undo restores root bucket and rank without reverting later notes; structural conflicts retain undo', () => {
+  const before=[task('a'),task('b'),task('child','a')];
+  const after=applyTaskMove(before,{taskId:'a',parentId:'b',placement:'end'});
+  undoManager.pushTaskDiff('移动节点「a」',before,after);
+  const edited=after.map(t=>t.id==='a'?{...t,note:'new note'}:t);
+  const undone=undoManager.undo(edited)!.newTasks;
+  assert.equal(get(undone,'a').parent_id,null);assert.equal(get(undone,'a').root_bucket,'categories');assert.equal(get(undone,'a').note,'new note');
+  const redone=undoManager.redo(undone)!.newTasks;
+  assert.equal(get(redone,'a').parent_id,'b');
+  const changed=redone.map(t=>t.id==='a'?{...t,sort_order:999}:t);
+  assert.throws(()=>undoManager.undo(changed),/结构已变化/);assert.equal(undoManager.canUndo(),true);
+});
+test('completed subtree move does not emit new completion events or change historical timestamps', () => {
+  const before=[task('root'),task('branch','root','done'),task('leaf','branch','done'),task('other')];
+  const after=applyTaskMove(before,{taskId:'branch',parentId:'other',placement:'end'});
+  assert.equal(get(after,'branch').status,'done');assert.equal(get(after,'branch').completed_at,timestamp);
+  assert.strictEqual(get(after,'leaf'),get(before,'leaf'));
+  assert.equal(buildTransitionEvents(before,after,'move-batch').length,0);
+});
+test('mobile inline expansion preserves siblings, hides collapsed children and remembers expansion',async()=>{
+  await mountMobile([task('root'),task('branch','root'),task('leaf','branch'),task('other','root')],'tree');
+  await click(document.querySelector('[data-drag-title="root"]'));
+  assert.equal(document.querySelector('[data-task-id="leaf"]'),null);
+  await click(document.querySelector('[aria-label="子任务 branch"]'));
+  assert.ok(document.querySelector('[data-task-id="leaf"]'));assert.ok(document.querySelector('[data-task-id="other"]'));
+  assert.ok(JSON.parse(localStorage.getItem('todotree.mobile.expanded.v1')!).includes('branch'));
+  await click(document.querySelector('[aria-label="子任务 branch"]'));
+  assert.equal(document.querySelector('[data-task-id="leaf"]'),null);
+});
+test('mobile move picker reparents without completing old parent',async()=>{
+  await mountMobile([task('root'),task('a','root'),task('leaf','a'),task('b','root')],'tree');
+  await click(document.querySelector('[data-drag-title="root"]'));
+  await click(document.querySelector('[aria-label="子任务 a"]'));
+  await click(document.querySelector('[aria-label="更多操作 leaf"]'));await button('移动到…');
+  const option=[...document.querySelectorAll('.m-sheet .m-menu button')].find(el=>el.textContent?.startsWith('b'));
+  await click(option!);assert.equal(get(mobileLatest,'leaf').parent_id,'b');assert.equal(get(mobileLatest,'a').status,'open');
+});
+
+test('mobile long hold directly reparents via dwell; ordinary scrolling and back cancel do not commit',async()=>{
+  await mountMobile([task('root'),task('a','root'),task('leaf','a'),task('b','root')],'tree');
+  await click(document.querySelector('[data-drag-title="root"]'));
+  const title=document.querySelector('[data-drag-title="a"]')!;
+  const target=document.querySelector('[data-tree-row="b"]')!;
+  const oldHit=document.elementFromPoint;
+  document.elementFromPoint=()=>target;
+  target.getBoundingClientRect=()=>({top:100,bottom:200,left:0,right:390,width:390,height:100,x:0,y:100,toJSON(){}});
+  try {
+    await act(()=>title.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,clientX:100,clientY:50})));
+    await act(()=>document.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:100,clientY:70})));
+    await act(async()=>{await new Promise(r=>setTimeout(r,330));});
+    assert.equal(document.querySelector('.m-drag-float'),null);
+    await act(()=>document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true})));
+    await act(()=>title.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,clientX:100,clientY:50})));
+    await act(async()=>{await new Promise(r=>setTimeout(r,340));});
+    assert.ok(document.querySelector('.m-drag-float'));
+    await act(()=>window.dispatchEvent(new Event('todotree:back',{cancelable:true})));
+    assert.equal(document.querySelector('.m-drag-float'),null);assert.equal(get(mobileLatest,'a').parent_id,'root');
+    await act(()=>title.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,clientX:100,clientY:50})));
+    await act(async()=>{await new Promise(r=>setTimeout(r,340));});
+    await act(()=>document.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:100,clientY:150})));
+    await act(async()=>{await new Promise(r=>setTimeout(r,720));});
+    assert.ok(document.querySelector('.drop-inside.drop-ready'));
+    await act(()=>document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true})));
+    assert.equal(get(mobileLatest,'a').parent_id,'b');assert.equal(get(mobileLatest,'leaf').parent_id,'a');assert.equal(get(mobileLatest,'root').status,'open');
+  } finally {document.elementFromPoint=oldHit;}
+});
+test('mobile rejected move retains source and reports failed save',async()=>{
+  await mountMobile([task('root'),task('a','root'),task('b','root')],'tree',true);
+  await click(document.querySelector('[data-drag-title="root"]'));
+  await click(document.querySelector('[aria-label="更多操作 a"]'));await button('移动到…');
+  const option=[...document.querySelectorAll('.m-sheet .m-menu button')].find(el=>el.textContent?.startsWith('b'));
+  await click(option!);assert.equal(get(mobileLatest,'a').parent_id,'root');assert.ok(document.querySelector('.m-sheet'));
 });

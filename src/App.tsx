@@ -1,3 +1,4 @@
+import { applyTaskMove, TaskMove } from './services/taskMove';
 import { MobileWorkspace } from './components/Mobile/MobileWorkspace';
 import { useMobileLayout } from './components/Mobile/useMobile';
 import { MobileTaskInput, createTaskRecord } from './services/mobileTasks';
@@ -451,7 +452,10 @@ export const App: React.FC = () => {
   // Undo / Redo handlers
   const handleUndo = useCallback(() => {
     const currentTasks = tasksRef.current;
-    const res = undoManager.undo(currentTasks);
+    if (saveStatus === 'saving' || storageError || batchBusy) return;
+    let res;
+    try { res = undoManager.undo(currentTasks); }
+    catch (error) { setToast({ id: 'undo-conflict', type: 'error', title: (error as Error).message }); return; }
     if (res) {
 
       updateTasksWithSave(res.newTasks, `撤销: ${res.description}`, false);
@@ -462,11 +466,14 @@ export const App: React.FC = () => {
         title: `已撤销: ${res.description}`,
       });
     }
-  }, [tasks, updateTasksWithSave]);
+  }, [tasks, updateTasksWithSave, saveStatus, storageError, batchBusy]);
 
   const handleRedo = useCallback(() => {
     const currentTasks = tasksRef.current;
-    const res = undoManager.redo(currentTasks);
+    if (saveStatus === 'saving' || storageError || batchBusy) return;
+    let res;
+    try { res = undoManager.redo(currentTasks); }
+    catch (error) { setToast({ id: 'redo-conflict', type: 'error', title: (error as Error).message }); return; }
     if (res) {
 
       updateTasksWithSave(res.newTasks, `重做: ${res.description}`, false);
@@ -477,7 +484,7 @@ export const App: React.FC = () => {
         title: `已重做: ${res.description}`,
       });
     }
-  }, [tasks, updateTasksWithSave]);
+  }, [tasks, updateTasksWithSave, saveStatus, storageError, batchBusy]);
 
   // Global Keyboard Shortcuts (Ctrl+N, Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)
   useEffect(() => {
@@ -991,56 +998,30 @@ export const App: React.FC = () => {
     });
   };
 
-  // 11. Move Node (Tree Reorder & Reparenting)
-  const handleMoveNode = (
-    draggedId: string,
-    targetId: string,
-    position: 'before' | 'after' | 'inside'
-  ) => {
-    const dragged = tasks.find((t) => t.id === draggedId);
-    const target = tasks.find((t) => t.id === targetId);
-    if (!dragged || !target) return;
-
-    let newParentId: string | null = target.parent_id;
-    if (position === 'inside') {
-      newParentId = target.id;
-    }
-
-    // Check depth and cycle
-    const check = canMoveSubtree(tasks, dragged, newParentId);
-    if (!check.allowed) {
-      setToast({
-        id: 'move-err-' + Date.now(),
-        type: 'error',
-        title: check.reason || '无法移动此节点',
-      });
-      return;
-    }
-
-    let nextTasks = [...tasks];
-    // Remove dragged from original list position
-    nextTasks = nextTasks.filter((t) => t.id !== draggedId);
-
-    const updatedDragged: TaskNode = {
-      ...dragged,
-      parent_id: newParentId,
-      root_bucket: newParentId === null ? 'categories' : null,
-      updated_at: new Date().toISOString(),
-    };
-
-    const targetIdx = nextTasks.findIndex((t) => t.id === targetId);
-    if (position === 'before') {
-      nextTasks.splice(targetIdx, 0, updatedDragged);
-    } else {
-      nextTasks.splice(targetIdx + 1, 0, updatedDragged);
-    }
-
-    if (dragged.status === 'open' && newParentId) {
-      nextTasks = reopenTaskBranch(nextTasks, newParentId);
-    }
-    undoManager.pushTaskDiff(`移动节点「${dragged.title}」`, tasks, nextTasks);
-    setUndoStackVersion(v => v + 1);
-    updateTasksWithSave(nextTasks, `移动节点「${dragged.title}」`, false);
+  // One structure-only transaction shared by mobile drag, move picker and desktop.
+  const moveBusyRef = useRef(false);
+  const handleTaskMove = async (move: TaskMove): Promise<boolean> => {
+    if (moveBusyRef.current || batchBusy || saveStatus === 'saving' || !loaded || !isTabOwner || storageError) return false;
+    moveBusyRef.current = true;
+    setBatchBusy(true);
+    try {
+      const before = tasksRef.current;
+      const next = applyTaskMove(before, move);
+      if (next === before) return true;
+      const title = before.find(t => t.id === move.taskId)?.title || '任务';
+      const ok = await updateTasksWithSave(next, `移动节点「${title}」`, true, true);
+      if (ok) setToast({ id: 'move-' + Date.now(), type: 'info', title: '任务位置已保存', canUndo: true, onUndo: handleUndo });
+      return ok;
+    } catch (error) {
+      setToast({ id: 'move-error', type: 'error', title: (error as Error).message });
+      return false;
+    } finally { moveBusyRef.current = false; setBatchBusy(false); }
+  };
+  const handleMoveNode = (draggedId: string, targetId: string, position: 'before' | 'after' | 'inside') => {
+    const target = tasksRef.current.find(t => t.id === targetId);
+    if (!target) return;
+    void handleTaskMove({ taskId: draggedId, parentId: position === 'inside' ? target.id : target.parent_id,
+      anchorId: targetId, placement: position === 'inside' ? 'end' : position });
   };
 
   // 12. Apply Template (PRD Section 8)
@@ -1452,7 +1433,7 @@ export const App: React.FC = () => {
           {mobileLayout && <MobileWorkspace tasks={tasks} view={currentView} timezone={settings.timezone}
             saveStatus={saveStatus} disabled={!loaded || !isTabOwner || !!storageError || batchBusy || saveStatus === 'saving'}
             overlayOpen={auxiliaryPanel.type !== 'none' || isSettingsModalOpen || isCreateModalOpen || isTemplateModalOpen}
-            onCreate={handleMobileCreate} onBulk={handleBulkAction} onSelect={handleSelectTask}
+            onMove={handleTaskMove} onCreate={handleMobileCreate} onBulk={handleBulkAction} onSelect={handleSelectTask}
             onRestore={handleRestoreTask} onArchive={handleArchiveCompleted} onCompleted={() => openAuxiliaryPanel('completed')}
             onUndo={handleUndo} canUndo={undoManager.canUndo()} onPrepareComplete={closeAuxiliaryPanel}
             onViewChange={setCurrentView} />}

@@ -27,6 +27,8 @@ import { getNodeDepth } from "../../services/treeOperations";
 import { CompletionCalendar } from "../TodayView/CompletionCalendar";
 import { MobileComposer, Draft } from "./MobileComposer";
 import { MobileTaskRow } from "./MobileTaskRow";
+import { TaskMove, visibleMobileTree, validateTaskMove } from '../../services/taskMove';
+import { useTreeDrag } from './useTreeDrag';
 import { useToday } from "./useMobile";
 interface Props {
   tasks: TaskNode[];
@@ -35,6 +37,7 @@ interface Props {
   saveStatus: SaveStatus;
   disabled: boolean;
   overlayOpen: boolean;
+  onMove: (move: TaskMove) => Promise<boolean>;
   onCreate: (input: MobileTaskInput) => Promise<boolean>;
   onBulk: (ids: string[], action: BulkAction) => Promise<boolean>;
   onSelect: (task: TaskNode) => void;
@@ -46,8 +49,17 @@ interface Props {
   onPrepareComplete: () => void;
   onViewChange: (view: ViewType) => void;
 }
-type Sheet = "none" | "tools" | "picker" | "task" | "classify" | "delete";
+type Sheet = "none" | "tools" | "picker" | "task" | "classify" | "delete" | "move";
 export function MobileWorkspace(p: Props) {
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    try { const ids = JSON.parse(localStorage.getItem('todotree.mobile.expanded.v1') || '[]');
+      return new Set(Array.isArray(ids) ? ids.filter(id => typeof id === 'string') : []); } catch { return new Set(); }
+  });
+  const [inlineParent, setInlineParent] = useState<string | null>(null);
+  const [inlineTitle, setInlineTitle] = useState('');
+  const [moveQuery, setMoveQuery] = useState('');
+  const [restoreView, setRestoreView] = useState<{ query: string; quadrant: QuadrantType | 'all'; sort: 'default' | 'priority' } | null>(null);
+  useEffect(() => { try { localStorage.setItem('todotree.mobile.expanded.v1', JSON.stringify([...expanded])); } catch { /* Preference failure must not block task writes. */ } }, [expanded]);
   const draftCache = useRef<Record<string, Draft>>({});
   const today = useToday(p.timezone);
   const index = useMemo(() => indexMobileTasks(p.tasks), [p.tasks]);
@@ -114,17 +126,8 @@ export function MobileWorkspace(p: Props) {
       : list;
   const visibleToday = sorted(filtered(todayTasks.current));
   const projectRows = useMemo(
-    () =>
-      (query.trim()
-        ? p.tasks.filter((t) => !t.deleted_at && !t.archived_at)
-        : index.children.get(parentId) || []
-      )
-        .filter((t) => !t.archived_at)
-        .sort(
-          (a, b) =>
-            Number(a.status === "done") - Number(b.status === "done") ||
-            a.sort_order - b.sort_order,
-        ),
+    () => (query.trim() ? p.tasks.filter(t => !t.deleted_at && !t.archived_at) : index.children.get(parentId) || [])
+      .filter(t => !t.archived_at).sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id)),
     [p.tasks, index, parentId, query],
   );
   const pendingLive = [...pending].filter(
@@ -143,6 +146,55 @@ export function MobileWorkspace(p: Props) {
     return ids.size;
   }, [index, pending]);
   const block = p.disabled || busy;
+  const moveTask = async (move: TaskMove) => {
+    if (busyRef.current || block) return false;
+    busyRef.current = true; setBusy(true);
+    try {
+      const ok = await p.onMove(move);
+      if (!ok) setNotice('移动未保存，原位置已保留');
+      if (ok) {
+        setSheet('none'); setNotice('位置已保存，可在页面更多中撤销');
+        if (move.parentId) setExpanded(old => new Set([...old, move.parentId!]));
+      }
+      return ok;
+    } finally { busyRef.current = false; setBusy(false); }
+  };
+  const treeUnfiltered = !query.trim() && quadrant === 'all' && sort === 'default';
+  const drag = useTreeDrag({
+    enabled: active && p.view === 'tree' && !calendar,
+    scope, tasks: p.tasks, scrollRef,
+    blockedReason: block ? '正在保存或当前不可编辑，请稍后再试' : sheet !== 'none' || p.overlayOpen ? '请先关闭操作面板' :
+      selecting ? '请先退出多选' : pendingLive.length ? '先确认或取消已勾选任务' : inlineParent ? '请先保存或取消正在输入的子任务' :
+      !treeUnfiltered ? '请先点击「在完整任务树中调整」' : '',
+    onMove: moveTask, onNotice: setNotice,
+    onExpand: id => setExpanded(old => new Set([...old, id])),
+    onMore: () => setVisibleCount(n => Math.min(n + 50, p.tasks.length)),
+  });
+  const expandedForRender = useMemo(() => new Set([...expanded, ...drag.temporaryExpanded]), [expanded, drag.temporaryExpanded]);
+  const treeRows = useMemo(() => visibleMobileTree(p.tasks, parentId, expandedForRender, drag.sourceId || undefined), [p.tasks, parentId, expandedForRender, drag.sourceId]);
+  const dragAncestors = (() => {
+    const source = drag.sourceId ? index.byId.get(drag.sourceId) : null;
+    const result: { id: string; title: string; anchorId: string }[] = [];
+    let branch = source?.parent_id ? index.byId.get(source.parent_id) : null;
+    const seen = new Set<string>();
+    while (branch?.parent_id && branch.id !== parentId && !seen.has(branch.id)) {
+      seen.add(branch.id);
+      const ancestor = index.byId.get(branch.parent_id);
+      if (!ancestor) break;
+      result.push({ id: ancestor.id, title: ancestor.title, anchorId: branch.id });
+      if (ancestor.id === parentId) break;
+      branch = ancestor;
+    }
+    return result;
+  })();
+  const saveInline = async () => {
+    if (!inlineParent || !inlineTitle.trim() || block || busyRef.current) return;
+    busyRef.current = true; setBusy(true);
+    try {
+      if (await p.onCreate({ title: inlineTitle, parentId: inlineParent, plannedDate: null })) { setInlineTitle(''); setInlineParent(null); }
+      else setNotice('子任务未保存，输入已保留');
+    } finally { busyRef.current = false; setBusy(false); }
+  };
   const toggle = (
     setter: React.Dispatch<React.SetStateAction<Set<string>>>,
     id: string,
@@ -265,16 +317,21 @@ export function MobileWorkspace(p: Props) {
       toggle(setSelected, task.id);
       return;
     }
-    if (isProject(task)) {
+    if (isProject(task) && (p.view !== "tree" || !parentId)) {
       setParentId(task.id);
       setQuery("");
       p.onViewChange("tree");
     } else p.onSelect(task);
   };
-  const row = (task: TaskNode, todayView = false) => (
+  const row = (task: TaskNode, todayView = false, tree = false) => (
     <MobileTaskRow
       key={task.id}
       task={task}
+      draggable={p.view === 'tree' && !todayView}
+      expanded={expandedForRender.has(task.id)}
+      onExpand={tree ? () => toggle(setExpanded, task.id) : undefined}
+      visibleChildren={(index.children.get(task.id) || []).filter(t => !t.archived_at).length}
+      onArchivedChildren={p.onCompleted}
       today={today}
       timezone={p.timezone}
       path={p.view === "tree" && !query ? "" : index.path(task)}
@@ -287,7 +344,7 @@ export function MobileWorkspace(p: Props) {
       selected={selected.has(task.id)}
       selecting={selecting}
       todayView={todayView}
-      disabled={block}
+      disabled={block || !!drag.sourceId}
       onCheck={() =>
         selecting ? toggle(setSelected, task.id) : complete(task)
       }
@@ -517,11 +574,19 @@ export function MobileWorkspace(p: Props) {
               </button>
             </div>
           )}
+          {p.view === 'tree' && drag.sourceId && <div className="m-drop-toolbar">
+            <span role="status">{drag.preview?.label || '拖到行间换序，停留在任务上移入'}</span>
+            {dragAncestors.map(a => <div key={a.id} data-drop-parent={a.id} data-drop-anchor={a.anchorId}
+              className={`m-ancestor-drop ${drag.preview?.kind === 'ancestor' && drag.preview.taskId === a.id ? 'is-target' : ''}`}>
+              移出到「{a.title}」</div>)}
+          </div>}
           <div
             className="m-scroll"
             ref={scrollRef}
             onScroll={(e) => {
               positions.current[scope] = e.currentTarget.scrollTop;
+              if (p.view === 'tree' && e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 200)
+                setVisibleCount(n => Math.min(n + 50, p.tasks.length));
             }}
           >
             {p.view === "today" && (
@@ -692,7 +757,30 @@ export function MobileWorkspace(p: Props) {
                     <button onClick={() => p.onSelect(parent)}>项目详情</button>
                   </div>
                 )}
-                {renderRows(sorted(filtered(projectRows)))}
+                {!treeUnfiltered && <button className="m-text-button" onClick={() => {
+                  setRestoreView({ query, quadrant, sort }); setQuery(''); setQuadrant('all'); setSort('default');
+                }}>在完整任务树中调整</button>}
+                {restoreView && <button className="m-text-button" onClick={() => {
+                  setQuery(restoreView.query); setQuadrant(restoreView.quadrant); setSort(restoreView.sort); setRestoreView(null);
+                }}>返回原筛选视图</button>}
+                {treeUnfiltered ? <>
+                  {parent && <p className="m-tree-hint">点子任务展开 · 长按标题拖动</p>}
+                  {treeRows.slice(0, visibleCount).map(({ task, depth }) => <React.Fragment key={task.id}>
+                    <div data-tree-row={task.id} style={{ '--tree-depth': depth } as React.CSSProperties}
+                      className={`m-tree-node ${drag.sourceId === task.id ? 'is-drag-source' : ''} ${drag.preview?.taskId === task.id ? `drop-${drag.preview.kind} ${drag.preview.error ? 'drop-invalid' : drag.preview.move ? 'drop-ready' : 'drop-wait'}` : ''}`}>
+                      {row(task, false, true)}
+                      {task.status === 'open' && !!index.children.get(task.id)?.length && index.children.get(task.id)!.every(t => t.status === 'done') &&
+                        <button className="m-confirm-remaining" disabled={block || !!drag.sourceId} onClick={() => complete(task)}>剩余子项已完成 · 确认完成</button>}
+                    </div>
+                    {inlineParent === task.id && <form className="m-inline-child" style={{ marginLeft: 12 * (depth + 1) }} onSubmit={e => { e.preventDefault(); void saveInline(); }}>
+                      <input autoFocus aria-label="子任务名称" value={inlineTitle} placeholder="输入子任务名称" onChange={e => setInlineTitle(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Escape') { setInlineParent(null); setInlineTitle(''); } if (e.key === 'Enter' && e.nativeEvent.isComposing) e.preventDefault(); }} />
+                      <button type="submit" disabled={block || !inlineTitle.trim()}>添加</button>
+                      <button type="button" disabled={block} onClick={() => { setInlineParent(null); setInlineTitle(''); }}>取消</button>
+                    </form>}
+                  </React.Fragment>)}
+                  {treeRows.length > visibleCount && <button className="m-text-button" onClick={() => setVisibleCount(n => n + 50)}>继续显示（还有 {treeRows.length - visibleCount} 项）</button>}
+                </> : renderRows(sorted(filtered(projectRows)))}
                 {!filtered(projectRows).length &&
                   empty(
                     query
@@ -704,6 +792,9 @@ export function MobileWorkspace(p: Props) {
                       ? "下方直接输入，即可在这里创建子任务。"
                       : "独立任务也可以直接记录，之后再细分。",
                   )}
+                {parent?.status === 'open' && (index.children.get(parent.id)?.length || 0) > 0 &&
+                  index.children.get(parent.id)!.every(t => t.status === 'done') &&
+                  <button className="m-text-button" disabled={block || !!drag.sourceId} onClick={() => complete(parent)}>剩余子项已完成 · 确认完成</button>}
                 {parent?.status === "done" && (
                   <button
                     className="m-text-button"
@@ -841,6 +932,10 @@ export function MobileWorkspace(p: Props) {
             )}
         </>
       )}
+      {drag.sourceId && <div ref={drag.floatingRef} className="m-drag-float" aria-hidden="true">
+        <strong>{index.byId.get(drag.sourceId)?.title}</strong>
+        <small>含 {index.descendants(drag.sourceId).filter(t => !t.archived_at).length} 个子项 · 整个分支移动</small>
+      </div>}
       {sheet !== "none" && (
         <div
           className="m-sheet-backdrop"
@@ -1058,19 +1153,22 @@ export function MobileWorkspace(p: Props) {
                   </button>
                 )}
                 <button onClick={() => setSheet("classify")}>设置四象限</button>
-                {getNodeDepth(p.tasks, target) < 5 && (
+                <button disabled={block || pendingLive.length > 0} onClick={() => { setMoveQuery(''); setSheet('move'); }}>移动到…</button>
+                {(['before', 'after'] as const).map((direction) => {
+                  const siblings = (index.children.get(target.parent_id) || []).filter(t => !t.archived_at).sort((a,b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id));
+                  const i = siblings.findIndex(t => t.id === target.id);
+                  const neighbor = siblings[i + (direction === 'before' ? -1 : 1)];
+                  return <button key={direction} disabled={!neighbor || block || pendingLive.length > 0} onClick={() => neighbor && void moveTask({ taskId: target.id, parentId: target.parent_id, anchorId: neighbor.id, placement: direction, expectedParentId: target.parent_id })}>{direction === 'before' ? '上移一位' : '下移一位'}</button>;
+                })}
+                {target.status === 'open' && getNodeDepth(p.tasks, target) < 5 && (
                   <button
                     onClick={() => {
                       setSheet("none");
-                      setParentId(target.id);
-                      p.onViewChange("tree");
-                      requestAnimationFrame(() =>
-                        document
-                          .querySelector<HTMLInputElement>(
-                            ".m-composer-line input",
-                          )
-                          ?.focus(),
-                      );
+                      if (p.view !== 'tree' || !treeUnfiltered) setParentId(target.parent_id);
+                      setQuery(''); setQuadrant('all'); setSort('default');
+                      setExpanded(old => new Set([...old, target.id]));
+                      setInlineParent(target.id); setInlineTitle('');
+                      p.onViewChange('tree');
                     }}
                   >
                     添加子任务
@@ -1084,7 +1182,7 @@ export function MobileWorkspace(p: Props) {
                       p.onViewChange("tree");
                     }}
                   >
-                    查看子任务
+                    聚焦此项
                   </button>
                 )}
                 <button className="m-danger" onClick={() => setSheet("delete")}>
@@ -1092,6 +1190,18 @@ export function MobileWorkspace(p: Props) {
                 </button>
               </div>
             )}
+            {sheet === 'move' && target && <div className="m-menu">
+              <p>移动「{target.title}」及其子任务，完成状态不变。</p>
+              <input aria-label="搜索目标节点" placeholder="搜索目标节点" value={moveQuery} onChange={e => setMoveQuery(e.target.value)} />
+              {[null, ...p.tasks.filter(t => !t.deleted_at && !t.archived_at && t.status === 'open' && matches(t, moveQuery)).slice(0, visibleCount)].map(node => {
+                const move: TaskMove = { taskId: target.id, parentId: node?.id || null, placement: 'end', expectedParentId: target.parent_id };
+                const error = validateTaskMove(p.tasks, move);
+                return <button key={node ? 'task:' + node.id : 'root-target'} disabled={block || !!error} title={error || undefined} onClick={() => void moveTask(move)}>
+                  <span>{node?.title || '移出为独立顶级项目'}<small className="m-task-path">{error || (node ? index.path(node) : '')}</small></span>
+                </button>;
+              })}
+            </div>}
+            {sheet === 'move' && p.tasks.length > visibleCount && <button className="m-text-button" onClick={() => setVisibleCount(n => n + 50)}>显示更多目标</button>}
             {sheet === "classify" && (
               <div className="m-menu">
                 {([null, "Q1", "Q2", "Q3", "Q4"] as QuadrantType[]).map((q) => (

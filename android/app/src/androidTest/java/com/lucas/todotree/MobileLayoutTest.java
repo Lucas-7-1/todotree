@@ -88,6 +88,35 @@ public class MobileLayoutTest {
         for(int i=0;i<100;i++){ if(js(activity,"return {ok:!!("+expression+")};").optBoolean("ok"))return;SystemClock.sleep(100); }
         throw new AssertionError(expression);
     }
+    private float[] point(ActivityScenario<MainActivity> activity, String selector) throws Exception {
+        JSONObject field=js(activity,"const r=document.querySelector('"+selector+"').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,width:innerWidth};");
+        CompletableFuture<float[]> result=new CompletableFuture<>();
+        activity.onActivity(a->{android.webkit.WebView web=a.getBridge().getWebView();int[] location=new int[2];web.getLocationOnScreen(location);
+            float scale=web.getWidth()/(float)field.optDouble("width");
+            result.complete(new float[]{location[0]+(float)field.optDouble("x")*scale,location[1]+(float)field.optDouble("y")*scale});});
+        return result.get(5,TimeUnit.SECONDS);
+    }
+    private void motion(long down, int action, float[] position) {
+        android.view.MotionEvent event=android.view.MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,position[0],position[1],0);
+        InstrumentationRegistry.getInstrumentation().sendPointerSync(event);event.recycle();
+    }
+    private void drag(ActivityScenario<MainActivity> activity,String source,String destination,boolean inside) throws Exception {
+        float[] start=point(activity,source);long down=SystemClock.uptimeMillis();
+        motion(down,android.view.MotionEvent.ACTION_DOWN,start);SystemClock.sleep(450);
+        waitFor(activity,".m-drag-float");
+        float[] end=point(activity,destination);
+        for(int i=1;i<=12;i++){motion(down,android.view.MotionEvent.ACTION_MOVE,new float[]{start[0]+(end[0]-start[0])*i/12,start[1]+(end[1]-start[1])*i/12});SystemClock.sleep(20);}
+        if(inside)waitFor(activity,".drop-inside.drop-ready");
+        else SystemClock.sleep(180);
+        motion(down,android.view.MotionEvent.ACTION_UP,end);
+        waitUntil(activity,"!document.querySelector('.m-drag-float') && !document.querySelector('.m-saving')");
+    }
+    private String parentInDatabase(String id) throws Exception {
+        NativeWorkspaceTest helper=new NativeWorkspaceTest();
+        org.json.JSONArray tasks=helper.read(helper.plugin(InstrumentationRegistry.getInstrumentation().getTargetContext())).getJSONObject("data").getJSONArray("tasks");
+        for(int i=0;i<tasks.length();i++)if(id.equals(tasks.getJSONObject(i).getString("id")))return tasks.getJSONObject(i).optString("parent_id");
+        throw new AssertionError("Missing persisted task: "+id);
+    }
     @Test public void mobileExecutionProjectsAndCalendar() throws Exception {
         seed();
         try(ActivityScenario<MainActivity> activity=ActivityScenario.launch(MainActivity.class)) {
@@ -103,8 +132,19 @@ public class MobileLayoutTest {
             js(activity,"document.querySelector('.m-confirm-bar .m-primary').click();return {};");
             waitUntil(activity,"!document.querySelector('[data-task-id=ui2]')");
             js(activity,"document.querySelectorAll('.mobile-navigation button')[1].click();return {};");waitFor(activity,"[data-task-id=ui0]");
-            js(activity,"document.querySelector('[data-task-id=ui0] .m-task-body').click();return {};");waitFor(activity,"[data-task-id=ui1].is-done");
+            js(activity,"document.querySelector('[data-task-id=ui0] .m-task-open').click();return {};");waitFor(activity,"[data-task-id=ui1].is-done");
             assertTrue(js(activity,"return {kept:!!document.querySelector('[data-task-id=ui4]')};").getBoolean("kept"));screenshot("project-retained-branch");
+            // Real Android touch events, not synthetic DOM drag calls. Move a completed
+            // branch into an open sibling and then back to the project via ancestor drop.
+            drag(activity,"[data-drag-title=ui1]","[data-tree-row=ui4]",true);
+            assertEquals("ui4",parentInDatabase("ui1"));
+            waitFor(activity,"[data-task-id=ui1].is-done");
+            assertTrue(js(activity,"return {open:!document.querySelector('[data-task-id=ui4]').classList.contains('is-done')};").getBoolean("open"));
+            screenshot("tree-drag-inside");
+            drag(activity,"[data-drag-title=ui1]","[data-drop-parent=ui0]",false);
+            assertEquals("ui0",parentInDatabase("ui1"));
+            screenshot("tree-drag-out");
+
             js(activity,"document.querySelectorAll('.mobile-navigation button')[0].click();return {};");
             waitUntil(activity,"document.querySelector('.m-heading h1')?.textContent==='今天'");
             js(activity,"document.querySelector('.m-date-link').click();return {};");waitFor(activity,".calendar-day-detail");screenshot("calendar");

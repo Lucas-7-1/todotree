@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const dir = path.resolve('node_modules/.cache/todotree-persistence');
 await mkdir(dir, { recursive: true });
-await writeFile(path.join(dir, 'entry.ts'), `export * from '../../../src/services/durableStore';\nexport * from '../../../src/services/storage';\n`);
+await writeFile(path.join(dir, 'entry.ts'), `export * from ${JSON.stringify(path.resolve('src/services/durableStore'))};\nexport * from ${JSON.stringify(path.resolve('src/services/storage'))};\n`);
 // Entry lives three levels below the repository root.
 await build({ entryPoints: [path.join(dir, 'entry.ts')], outfile: path.join(dir, 'store.cjs'), bundle: true, format: 'cjs', platform: 'node', logLevel: 'silent' });
 const require = createRequire(import.meta.url);
@@ -17,7 +17,7 @@ globalThis.window = dom.window; globalThis.localStorage = dom.window.localStorag
 const clone = value => JSON.parse(JSON.stringify(value));
 function task(id) { return { id, title: id, status: 'open', parent_id: null, deleted_at: null, completed_at: null }; }
 function setup(initial = [task('a')]) {
-  delete require.cache[modulePath]; localStorage.clear(); window.__TODOTREE_DESKTOP__ = true;
+  delete require.cache[require.resolve(modulePath)]; localStorage.clear(); window.__TODOTREE_DESKTOP__ = true;
   const api = require(modulePath);
   let state = { schema_version: 2, revision: 0, operation_id: 'initial', saved_at: '2026-09-24T00:00:00Z', data: { ...api.emptyWorkspace(), tasks: initial } };
   const writes = [];

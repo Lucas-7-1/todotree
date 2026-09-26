@@ -135,7 +135,7 @@ const assert = require("node:assert/strict");
       .click();
     await page.locator('[data-task-id="t1"]').waitFor({ state: "hidden" });
     await page.getByRole("button", { name: "项目", exact: true }).click();
-    await page.locator('[data-task-id="p1"] .m-task-body').click();
+    await page.locator('[data-task-id="p1"] .m-task-open').click();
     await page.locator('[data-task-id="p2"].is-done').waitFor();
     assert.equal(await page.locator('[data-task-id="p3"]').count(), 1);
     await assertFits();
@@ -147,9 +147,9 @@ const assert = require("node:assert/strict");
       .click();
     await page.getByRole("button", { name: "添加子任务", exact: true }).click();
     await page
-      .getByRole("textbox", { name: "任务标题", exact: true })
+      .getByRole("textbox", { name: "子任务名称", exact: true })
       .fill("首次新增子任务");
-    await page.getByRole("button", { name: "保存任务", exact: true }).click();
+    await page.getByRole("button", { name: "添加", exact: true }).click();
     await page
       .locator(".m-task-title", { hasText: "首次新增子任务" })
       .waitFor();
@@ -158,9 +158,9 @@ const assert = require("node:assert/strict");
       .click();
     await page.getByRole("button", { name: "添加子任务", exact: true }).click();
     await page
-      .getByRole("textbox", { name: "任务标题", exact: true })
+      .getByRole("textbox", { name: "子任务名称", exact: true })
       .fill("首次新增孙任务");
-    await page.getByRole("button", { name: "保存任务", exact: true }).click();
+    await page.getByRole("button", { name: "添加", exact: true }).click();
     await page
       .locator(".m-task-title", { hasText: "首次新增孙任务" })
       .waitFor();

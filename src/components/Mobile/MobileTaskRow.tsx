@@ -15,6 +15,11 @@ interface Props {
   selecting?: boolean;
   todayView?: boolean;
   disabled?: boolean;
+  expanded?: boolean;
+  onExpand?: () => void;
+  draggable?: boolean;
+  onArchivedChildren?: () => void;
+  visibleChildren?: number;
   onCheck: () => void;
   onOpen: () => void;
   onMenu: () => void;
@@ -58,15 +63,21 @@ export function MobileTaskRow(p: Props) {
           )}
         </span>
       </button>
-      <button className="m-task-body" onClick={p.onOpen}>
-        <span className="m-task-title">{t.title}</span>
+      <div className="m-task-body">
+        <button className="m-task-open" onClick={p.onOpen} data-drag-title={p.draggable ? t.id : undefined}>
+          <span className="m-task-title">{t.title}</span>
+        </button>
         {p.path && <span className="m-task-path">{p.path}</span>}
         <span className="m-task-meta">
           {p.childrenCount > 0 && (
-            <span className="m-project-progress">
-              {done ? "子项已完成" : `还有 ${p.openChildren} 项未完成`}
-              <ChevronRight size={12} />
-            </span>
+            <button className="m-project-progress" disabled={p.disabled}
+              aria-expanded={p.onExpand && p.visibleChildren ? !!p.expanded : undefined}
+              aria-label={`子任务 ${t.title}`}
+              onClick={p.onExpand ? p.visibleChildren ? p.onExpand : p.onArchivedChildren : p.onOpen}>
+              <ChevronRight size={14} className={p.expanded ? 'm-rotated' : ''} />
+              {p.onExpand ? p.visibleChildren ? `子任务 ${p.childrenCount - p.openChildren} / ${p.childrenCount}` : '子项已归档 · 查看记录'
+                : done ? '子项已完成' : `还有 ${p.openChildren} 项未完成`}
+            </button>
           )}
           {dueLabel && (
             <span className={due! < p.today ? "m-overdue" : "m-date"}>
@@ -86,16 +97,16 @@ export function MobileTaskRow(p: Props) {
           )}
           {p.pending && <span className="m-pending-label">待确认</span>}
         </span>
-      </button>
+      </div>
       {!p.selecting &&
         (done ? (
-          <button
+          <div className="m-done-actions"><button
             className="m-archive"
             onClick={p.onArchive}
             disabled={p.disabled}
           >
             搞定
-          </button>
+          </button><button className="m-icon" aria-label={`更多操作 ${t.title}`} onClick={p.onMenu} disabled={p.disabled}><MoreHorizontal size={18} /></button></div>
         ) : (
           <button
             className="m-icon"

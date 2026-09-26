@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const dir=path.resolve('node_modules/.cache/todotree-android-tests');await mkdir(dir,{recursive:true});
 const mock=path.join(dir,'platform.ts');
-await writeFile(mock, `export const isAndroid = () => true; export const NativeWorkspace = { read: (...a) => globalThis.nativeMock.read(...a), commit: (...a) => globalThis.nativeMock.commit(...a) }; export { workspaceDelta } from '../../../src/services/native/workspaceDelta';`);
+await writeFile(mock, `export const isAndroid = () => true; export const NativeWorkspace = { read: (...a) => globalThis.nativeMock.read(...a), commit: (...a) => globalThis.nativeMock.commit(...a) }; export { workspaceDelta } from ${JSON.stringify(path.resolve('src/services/native/workspaceDelta'))};`);
 await build({entryPoints:['src/services/durableStore.ts'],outfile:path.join(dir,'store.cjs'),bundle:true,platform:'node',format:'cjs',plugins:[{name:'native-bridge-test',setup(b){b.onResolve({filter:/native\/platform$/},()=>({path:mock}));}}]});
 await build({entryPoints:['src/services/native/workspaceDelta.ts'],outfile:path.join(dir,'delta.cjs'),bundle:true,platform:'node',format:'cjs'});
 const require=createRequire(import.meta.url), {workspaceDelta}=require(path.join(dir,'delta.cjs'));
@@ -15,7 +15,7 @@ const dom=new JSDOM('',{url:'https://localhost/'});globalThis.window=dom.window;
 const clone=v=>JSON.parse(JSON.stringify(v));
 const task=id=>({id,title:id,parent_id:null,status:'open'});
 function setup(){
- delete require.cache[path.join(dir,'store.cjs')];localStorage.clear();
+ delete require.cache[require.resolve(path.join(dir,'store.cjs'))];localStorage.clear();
  const api=require(path.join(dir,'store.cjs'));let state={schema_version:2,revision:0,operation_id:'android-init',saved_at:new Date().toISOString(),data:api.emptyWorkspace()};const writes=[];
  globalThis.fetch=()=>{throw Error('Android must not request desktop server')};
  globalThis.nativeMock={read:async()=>clone(state),commit:async op=>{if(op.operation_id===state.operation_id)return clone(state);if(op.expected_revision!==state.revision)throw Error('conflict');const next=clone(state.data);

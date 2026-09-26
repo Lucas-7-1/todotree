@@ -974,3 +974,38 @@ html.mobile-layout .review-empty p {
   line-height: 1.8;
   color: #64748b;
 }
+
+/* Mobile outline: stable task identity; indentation never creates a wider canvas. */
+.m-task-open { display: block; text-align: left; width: 100%; min-height: 32px; }
+.m-task-open[data-drag-title] { -webkit-touch-callout: none; user-select: none; }
+.m-task .m-project-progress { min-height: 36px; padding: 4px 0; text-align: left; }
+.m-tree-node { position: relative; margin-left: calc(var(--tree-depth, 0) * 12px); min-width: 0; }
+.m-tree-node[style]:not([style*="--tree-depth: 0"]) { border-left: 1px solid #e8edf3; }
+.m-tree-node .m-task { padding-left: 0; gap: 4px; }
+.m-tree-node .m-task-title { -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.m-tree-hint { color: #8793a4; font-size: 12px; padding: 0 4px 8px; }
+.m-done-actions { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+.m-done-actions .m-icon { min-height: 28px; height: 28px; }
+.m-inline-child { display: flex; gap: 6px; padding: 8px 0; border-bottom: 1px solid #dbeafe; }
+.m-inline-child input { min-width: 0; flex: 1; border: 1px solid #93b4fa; border-radius: 8px; padding: 10px 8px; font-size: 16px; }
+.m-inline-child button { color: #2563eb; min-height: 44px; padding: 0 6px; }
+.m-drop-toolbar { flex-shrink: 0; padding: 8px 16px; background: #eff6ff; border-bottom: 1px solid #c5dbff; font-size: 12px; }
+.m-drop-toolbar > span { display: block; color: #2457a8; padding-bottom: 4px; }
+.m-ancestor-drop { min-height: 44px; display: flex; align-items: center; padding: 6px 12px; border: 1px dashed #9fbcf2; border-radius: 8px; margin-top: 4px; }
+.m-ancestor-drop.is-target { background: #dbeafe; border-style: solid; }
+.m-drag-float { position: fixed; top: 0; left: 0; width: 240px; padding: 12px 16px; border: 1px solid #a6c4ff; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px #20356026; z-index: 120; pointer-events: none; will-change: transform; }
+.m-drag-float strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.m-drag-float small { color: #738095; font-size: 11px; }
+.m-tree-node.is-drag-source { opacity: .3; background: #f1f5f9; }
+.m-tree-node.drop-before::before, .m-tree-node.drop-after::after { content: ''; position: absolute; height: 3px; left: 0; right: 0; background: #2563eb; z-index: 1; }
+.m-tree-node.drop-before::before { top: 0; }
+.m-tree-node.drop-after::after { bottom: 0; }
+.m-tree-node.drop-inside { background: #eff6ff; outline: 1px dashed #93b4fa; border-radius: 8px; }
+.m-tree-node.drop-inside.drop-ready { outline: 2px solid #2563eb; }
+.m-tree-node.drop-invalid { outline: 1px solid #dc6565; background: #fff4f4; }
+.m-tree-node.drop-invalid::before, .m-tree-node.drop-invalid::after { background: #dc6565; }
+html.m-dragging { user-select: none; cursor: grabbing; }
+html.m-dragging .m-composer { visibility: hidden; }
+html.m-dragging .m-task button { pointer-events: none; }
+.m-task .m-project-progress { display: inline-flex; align-items: center; gap: 4px; }
+.m-confirm-remaining { font-size: 12px; min-height: 36px; color: #138e6b; margin-left: 48px; text-align: left; }

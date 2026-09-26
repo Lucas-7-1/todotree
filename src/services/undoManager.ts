@@ -1,3 +1,4 @@
+import { canMoveSubtree } from './treeOperations';
 import { TaskNode, DeltaUndoCommand, TaskFieldChanges } from '../types/todo';
 
 const MAX_UNDO_STACK = 50;
@@ -187,6 +188,7 @@ class UndoManager {
         'due_date',
         'due_at',
         'parent_id',
+          'root_bucket',
         'sort_order',
         'deleted_at',
         'outcome_note',
@@ -249,6 +251,7 @@ class UndoManager {
           'due_date',
           'due_at',
           'parent_id',
+          'root_bucket',
           'sort_order',
           'deleted_at',
           'outcome_note',
@@ -315,6 +318,33 @@ class UndoManager {
   /**
    * Undo the top command, or a specific command by ID (from Toast "撤销" button)
    */
+  private validateStructureReplay(tasks: TaskNode[], command: DeltaUndoCommand, direction: 'before' | 'after') {
+    const structural = command.changes.filter(c => 'parent_id' in c[direction] || 'sort_order' in c[direction]);
+    if (!structural.length || !command.description.startsWith('移动节点')) return;
+    const byId = new Map(tasks.map(t => [t.id, t]));
+    const expected = direction === 'before' ? 'after' : 'before';
+    for (const change of structural) {
+      const task = byId.get(change.taskId);
+      if (!task || task.deleted_at || task.archived_at) throw new Error('任务已删除或归档，不能撤销／重做移动');
+      for (const field of ['parent_id', 'sort_order'] as const) {
+        if (field in change[expected] && task[field] !== change[expected][field]) throw new Error('任务结构已变化，不能覆盖后续移动');
+      }
+      const parentId = change[direction].parent_id;
+      if (parentId !== undefined) {
+        const visited = new Set<string>();
+        let parent = parentId;
+        while (parent) {
+          const node = byId.get(parent);
+          if (!node || node.deleted_at || node.archived_at || visited.has(parent)) throw new Error('原父节点不可用，不能撤销／重做移动');
+          if (task.status === 'open' && node.status === 'done') throw new Error('目标父节点已完成，请先恢复');
+          visited.add(parent); parent = node.parent_id;
+        }
+        const check = canMoveSubtree(tasks, task, parentId);
+        if (!check.allowed) throw new Error(check.reason);
+      }
+    }
+  }
+
   public undo(
     currentTasks: TaskNode[],
     targetCommandId?: string
@@ -329,6 +359,7 @@ class UndoManager {
       }
     }
 
+    this.validateStructureReplay(currentTasks, this.undoStack[targetIdx], 'before');
     const [cmd] = this.undoStack.splice(targetIdx, 1);
     if (!cmd) return null;
 
@@ -360,6 +391,7 @@ class UndoManager {
   ): { newTasks: TaskNode[]; description: string; commandId: string } | null {
     if (this.redoStack.length === 0) return null;
 
+    this.validateStructureReplay(currentTasks, this.redoStack[this.redoStack.length - 1], 'after');
     const cmd = this.redoStack.pop()!;
     const changeMap = new Map(cmd.changes.map((c) => [c.taskId, c.after]));
     const newTasks = currentTasks.map((t) => {
