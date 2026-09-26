@@ -1,3 +1,7 @@
+import { MobileWorkspace } from './components/Mobile/MobileWorkspace';
+import { useMobileLayout } from './components/Mobile/useMobile';
+import { MobileTaskInput, createTaskRecord } from './services/mobileTasks';
+import { formatDateInTimezone } from './services/calendarService';
 import { isAndroid } from './services/native/platform';
 import { App as NativeApp } from '@capacitor/app';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -72,11 +76,14 @@ import {
 import { buildFactsPackage } from './services/ai/factsEngine';
 
 export const App: React.FC = () => {
+  const mobileLayout = useMobileLayout();
+  const mobileCommitLock = useRef(false);
+  useEffect(() => { document.documentElement.classList.toggle('mobile-layout', mobileLayout); return () => document.documentElement.classList.remove('mobile-layout'); }, [mobileLayout]);
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
   const [settings, setSettings] = useState<AppSettings>(loadSettingsFromStorage());
-  const [currentView, setCurrentView] = useState<ViewType>(isAndroid() ? 'today' : 'tree');
+  const [currentView, setCurrentView] = useState<ViewType>(mobileLayout ? 'today' : 'tree');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [quickInputParentId, setQuickInputParentId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -408,7 +415,7 @@ export const App: React.FC = () => {
         await saveTasksToStorage(newTasks, /永久|清空|导入|重置/.test(actionDesc));
         if (confirmedOnly) {
           const oldById = new Map(previous.map(t => [t.id, t]));
-          animateArchivedRows(new Set(newTasks.filter(t => t.archived_at && !oldById.get(t.id)?.archived_at).map(t => t.id)), document.documentElement.dataset.reducedMotion === 'true');
+          animateArchivedRows(new Set(newTasks.filter(t => t.archived_at && !oldById.get(t.id)?.archived_at).map(t => t.id)), document.documentElement.dataset.reducedMotion === 'true', new Set(newTasks.filter(t => t.status === 'done' && oldById.get(t.id)?.status === 'open').map(t => t.id)));
           tasksRef.current = newTasks; setTasks(newTasks);
         }
         if (recordUndo) { undoManager.pushTaskDiff(actionDesc, previous, newTasks); setUndoStackVersion(v => v + 1); }
@@ -582,31 +589,8 @@ export const App: React.FC = () => {
       return null;
     }
 
-    const newTask: TaskNode = {
-      id: generateId(),
-      parent_id: parentId,
-      root_bucket: parentId === null ? 'categories' : null,
-      title: title.trim(),
-      note: '',
-      sort_order: Date.now(),
-      status: 'open',
-      completed_at: null,
-      archived_at: null,
-      due_type: dueType,
-      due_date: dueDate,
-      due_at: null,
-      quadrant: quadrant,
-      planned_date: null,
-      recurrence_rule: recurrenceRule || null,
-      recurrence_rule_id: recurrenceRule ? recurrenceRule.id : null,
-      recurrence_period_key: recurrenceRule
-        ? computePeriodKey(recurrenceRule, dueDate || getTodayDateString(0))
-        : null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      deleted_at: null,
-      deletion_batch_id: null,
-    };
+    const newTask = createTaskRecord({ title, parentId, plannedDate: null, dueDate, quadrant, recurrenceRule }, getTodayDateString(0));
+    newTask.due_type = dueType;
 
     let nextTasks: TaskNode[];
     try {
@@ -620,6 +604,20 @@ export const App: React.FC = () => {
     updateTasksWithSave(nextTasks, `添加任务「${newTask.title}」`, false);
     setQuickInputParentId(null);
     return newTask;
+  };
+
+  // Mobile drafts clear only after the durable commit acknowledges success.
+  const handleMobileCreate = async (input: MobileTaskInput): Promise<boolean> => {
+    if (mobileCommitLock.current || batchBusy || saveStatus === 'saving' || !loaded || !isTabOwner || storageError) return false;
+    mobileCommitLock.current = true;
+    try {
+      const record = createTaskRecord(input, formatDateInTimezone(new Date(), settings.timezone));
+      const next = insertTaskNode(tasksRef.current, record);
+      return await updateTasksWithSave(next, `添加任务「${record.title}」`, true, true);
+    } catch (error) {
+      setToast({ id: 'mobile-add-error', type: 'error', title: (error as Error).message });
+      return false;
+    } finally { mobileCommitLock.current = false; }
   };
 
   const handleAddTaskInline = (parentId: string, title: string): TaskNode | null => {
@@ -1423,7 +1421,7 @@ export const App: React.FC = () => {
         }} />}
         {(!loaded || batchBusy || storageError || saveStatus === 'saving') && <div className="absolute inset-0 z-30 bg-white/40" aria-label="正在保护数据" />}
         {/* Header (Hidden in review view as it has its own dedicated toolbar) */}
-        {currentView !== 'review' && (
+        {currentView !== 'review' && !(mobileLayout && ['today','tree','quadrant'].includes(currentView)) && (
           <Header
             title={
               currentView === 'tree'
@@ -1451,7 +1449,15 @@ export const App: React.FC = () => {
 
         {/* View Switcher Container */}
         <div className="flex-1 flex min-h-0 overflow-hidden relative">
-          {currentView === 'tree' && (
+          {mobileLayout && <MobileWorkspace tasks={tasks} view={currentView} timezone={settings.timezone}
+            saveStatus={saveStatus} disabled={!loaded || !isTabOwner || !!storageError || batchBusy || saveStatus === 'saving'}
+            overlayOpen={auxiliaryPanel.type !== 'none' || isSettingsModalOpen || isCreateModalOpen || isTemplateModalOpen}
+            onCreate={handleMobileCreate} onBulk={handleBulkAction} onSelect={handleSelectTask}
+            onRestore={handleRestoreTask} onArchive={handleArchiveCompleted} onCompleted={() => openAuxiliaryPanel('completed')}
+            onUndo={handleUndo} canUndo={undoManager.canUndo()} onPrepareComplete={closeAuxiliaryPanel}
+            onViewChange={setCurrentView} />}
+
+          {!mobileLayout && currentView === 'tree' && (
             <div className="flex-1 flex flex-col min-w-0 h-full">
               <TaskTree
                 tasks={tasks}
@@ -1510,7 +1516,7 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {currentView === 'today' && (
+          {!mobileLayout && currentView === 'today' && (
             <TodayView
               onOpenTaskTree={() => setCurrentView('tree')}
               tasks={tasks}
@@ -1526,7 +1532,7 @@ export const App: React.FC = () => {
             />
           )}
 
-          {currentView === 'quadrant' && (
+          {!mobileLayout && currentView === 'quadrant' && (
             <QuadrantWorkspace
               tasks={tasks}
               onUpdateQuadrant={handleUpdateQuadrant}

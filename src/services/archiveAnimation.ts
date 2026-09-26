@@ -1,12 +1,12 @@
 /** A short, non-interactive visual copy; business commits never depend on animation callbacks. */
-export function animateArchivedRows(ids: Set<string>, reducedMotion: boolean): void {
-  if (!ids.size || reducedMotion || typeof document === 'undefined') return;
+export function animateArchivedRows(ids: Set<string>, reducedMotion: boolean, completedIds = new Set<string>()): void {
+  if ((!ids.size && !completedIds.size) || reducedMotion || typeof document === 'undefined') return;
   const layer = document.createElement('div');
   layer.setAttribute('aria-hidden', 'true');
   Object.assign(layer.style, { position: 'fixed', inset: '0', pointerEvents: 'none', zIndex: '45' });
   let count = 0;
   for (const row of document.querySelectorAll<HTMLElement>('[data-task-id]')) {
-    if (!ids.has(row.dataset.taskId!)) continue;
+    if (!ids.has(row.dataset.taskId!) && !(completedIds.has(row.dataset.taskId!) && row.dataset.exitOnComplete === 'true')) continue;
     const rect = row.getBoundingClientRect();
     if (!rect.height || rect.bottom < 0 || rect.top > window.innerHeight || count++ >= 40) continue;
     const copy = row.cloneNode(true) as HTMLElement;

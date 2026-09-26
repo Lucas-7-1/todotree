@@ -10,7 +10,7 @@ export function MobileNavigation(p: Props) {
     window.addEventListener('todotree:back', close);
     return () => window.removeEventListener('todotree:back', close);
   }, [more]);
-  const items = [{ id: 'today', text: '今天', icon: CalendarDays }, { id: 'tree', text: '任务', icon: ListTodo }, { id: 'quadrant', text: '四象限', icon: LayoutGrid }, { id: 'review', text: '复盘', icon: Sparkles }] as const;
+  const items = [{ id: 'today', text: '今天', icon: CalendarDays }, { id: 'tree', text: '项目', icon: ListTodo }, { id: 'quadrant', text: '四象限', icon: LayoutGrid }, { id: 'review', text: '复盘', icon: Sparkles }] as const;
   return <>
     <nav className="mobile-navigation" aria-label="手机主导航">
       {items.map(({ id, text, icon: Icon }) => <button key={id} aria-current={p.currentView === id ? 'page' : undefined} onClick={() => { setMore(false); p.onViewChange(id); }}><Icon size={21}/><span>{text}</span></button>)}

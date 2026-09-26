@@ -1,3 +1,4 @@
+import { useMobileLayout } from '../Mobile/useMobile';
 import { downloadTextFile } from '../../services/importExport';
 import React, { useState, useEffect, useMemo } from 'react';
 import { TaskNode } from '../../types/todo';
@@ -483,12 +484,15 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
     };
   };
 
+  const mobile = useMobileLayout();
+  const [mobileOptions, setMobileOptions] = useState(false);
   const primaryBtn = getPrimaryButtonProps();
 
   return (
     <div className="review-workspace flex-1 flex flex-col min-w-0 bg-[#f8fafc] overflow-y-auto">
+      {mobile && <header className="m-review-header"><div><h1>工作复盘</h1><p>{factsPackage.period.label} · {factsPackage.stats.completed_leaf_instances} 项完成</p></div><div className="m-review-actions"><button onClick={() => setMobileOptions(v => !v)}>生成设置</button><button onClick={onOpenHistory}>历史</button><button disabled={primaryBtn.disabled} onClick={primaryBtn.onClick}>{isGenerating ? '生成中…' : primaryBtn.text}</button></div></header>}
       {/* 1. Compact 1-2 Row Control Console Toolbar (PRD Section 3.2) */}
-      <div className="bg-white border-b border-slate-200/80 px-6 py-2.5 flex-shrink-0 select-none shadow-2xs space-y-2">
+      <div hidden={mobile && !mobileOptions} className="review-options bg-white border-b border-slate-200/80 px-6 py-2.5 flex-shrink-0 select-none shadow-2xs space-y-2">
         {/* Row 1: Periods, Scope, Templates & Quick Actions */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           {/* Left: Period Tabs */}

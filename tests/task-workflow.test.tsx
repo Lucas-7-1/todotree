@@ -506,3 +506,44 @@ test('PRD Section 4.1: Quadrant width calculation formulas and drawer mode thres
   const drawerW2 = Math.min(640, 1100 - 32); // 640
   assert.equal(drawerW2, 640);
 });
+
+// Mobile execution and project views share the same real lifecycle actions.
+import { MobileWorkspace } from '../src/components/Mobile/MobileWorkspace';
+import { selectMobileToday, createTaskRecord } from '../src/services/mobileTasks';
+import { formatDateInTimezone } from '../src/services/calendarService';
+import { ViewType } from '../src/types/todo';
+let mobileLatest: TaskNode[] = [];
+function MobileHarness({initial,view='today',reject=false}:{initial:TaskNode[];view?:ViewType;reject?:boolean}) {
+  const [tasks,setTasks]=useState(initial);const [current,setView]=useState(view);mobileLatest=tasks;
+  return <MobileWorkspace tasks={tasks} view={current} timezone="Asia/Shanghai" saveStatus="saved" disabled={false} overlayOpen={false}
+    onCreate={async input=>{if(reject)return false;setTasks(previous=>insertTaskNode(previous,createTaskRecord(input,formatDateInTimezone(new Date(),'Asia/Shanghai'))));return true;}}
+    onBulk={async(ids,action)=>{if(reject)return false;setTasks(previous=>applyBulkAction(previous,ids,action).tasks);return true;}}
+    onSelect={()=>{}} onRestore={t=>setTasks(previous=>reopenTaskBranch(previous,t.id))} onArchive={t=>setTasks(previous=>archiveCompletedBranch(previous,t.id).tasks)}
+    onCompleted={()=>{}} onUndo={()=>{}} canUndo={false} onPrepareComplete={()=>{}} onViewChange={setView}/>;
+}
+async function mountMobile(initial:TaskNode[],view:ViewType='today',reject=false){const host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(()=>root!.render(<MobileHarness initial={initial} view={view} reject={reject}/>));}
+async function mobileType(value:string){const el=document.querySelector('.m-composer input') as HTMLInputElement;assert.ok(el);await act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}));});}
+const mobileDay=()=>formatDateInTimezone(new Date(),'Asia/Shanghai');
+test('mobile today separates planning from deadlines, deduplicates and uses configured timezone',()=>{
+  const items=[{...task('due'),due_type:'datetime' as const,due_at:'2026-09-25T17:00:00Z'}, {...task('both'),planned_date:'2026-09-26',due_type:'date' as const,due_date:'2026-09-26'}, {...task('old'),planned_date:'2026-09-25'}, {...task('overdue-planned'),planned_date:'2026-09-26',due_type:'date' as const,due_date:'2026-09-24'}, {...task('priority-only'),quadrant:'Q1' as const}];
+  const result=selectMobileToday(items,'2026-09-26','Asia/Shanghai');assert.deepEqual(result.current.map(t=>t.id),['due','both','overdue-planned']);assert.deepEqual(result.previous.map(t=>t.id),['old']);assert.equal(result.overdue.length,0);
+});
+test('mobile title-only capture plans today without deadline or priority, failure retains draft',async()=>{
+  await mountMobile([]);await mobileType('今日临时事项');await click(document.querySelector('[aria-label="保存任务"]'));assert.equal(mobileLatest.length,1);assert.equal(mobileLatest[0].planned_date,mobileDay());assert.equal(mobileLatest[0].due_date,null);assert.equal(mobileLatest[0].quadrant,null);
+  await act(()=>root!.unmount());root=undefined;document.body.innerHTML='';await mountMobile([],'today',true);await mobileType('失败也保留');await click(document.querySelector('[aria-label="保存任务"]'));assert.equal((document.querySelector('.m-composer input') as HTMLInputElement).value,'失败也保留');assert.equal(mobileLatest.length,0);
+});
+test('mobile can create first child and first grandchild without existing children',async()=>{
+  await mountMobile([task('root')],'tree');await click(document.querySelector('[aria-label="更多操作 root"]'));await button('添加子任务');await mobileType('child');await click(document.querySelector('[aria-label="保存任务"]'));assert.equal(mobileLatest.find(t=>t.title==='child')?.parent_id,'root');
+  await click(document.querySelector('[aria-label="更多操作 child"]'));await button('添加子任务');await mobileType('grandchild');await click(document.querySelector('[aria-label="保存任务"]'));assert.equal(mobileLatest.find(t=>t.title==='grandchild')?.parent_id,mobileLatest.find(t=>t.title==='child')?.id);assert.equal(mobileLatest.find(t=>t.title==='child')?.planned_date,null);
+});
+test('mobile queues multiple checks; today removal does not archive a completed branch with open sibling',async()=>{
+  const items=[task('root'),task('branch','root'),task('other','root'),{...task('a','branch'),planned_date:mobileDay()},{...task('b','branch'),planned_date:mobileDay()}];await mountMobile(items);
+  await click(document.querySelector('[aria-label="勾选完成 a"]'));await click(document.querySelector('[aria-label="勾选完成 b"]'));assert.equal(document.querySelectorAll('.is-pending').length,2);assert.equal(mobileLatest.find(t=>t.id==='a')?.status,'open');await button('确认完成 2 项');assert.equal(document.querySelectorAll('.m-task').length,0);assert.equal(get(mobileLatest,'branch').status,'done');assert.equal(get(mobileLatest,'branch').archived_at,null);assert.equal(get(mobileLatest,'root').status,'open');assert.equal(get(mobileLatest,'other').status,'open');
+});
+test('mobile failed batch keeps confirmation and cancelling plan still shows due-today reason',async()=>{
+  await mountMobile([{...task('a'),planned_date:mobileDay()}],'today',true);await click(document.querySelector('[aria-label="勾选完成 a"]'));await button('确认完成');assert.ok(document.querySelector('.is-pending'));
+  await act(()=>root!.unmount());root=undefined;document.body.innerHTML='';await mountMobile([{...task('due'),planned_date:mobileDay(),due_type:'date',due_date:mobileDay()}]);await click(document.querySelector('[aria-label="更多操作 due"]'));await button('取消今日安排（仍因截止显示）');assert.equal(get(mobileLatest,'due').planned_date,null);assert.ok(document.querySelector('[data-task-id="due"]'));assert.match(document.body.textContent||'',/仍因今天截止显示/);
+});
+test('mobile Chinese IME Enter does not create and a 10000-root list renders bounded rows',async()=>{
+  await mountMobile(Array.from({length:10000},(_,i)=>task('r'+i)),'tree');assert.equal(document.querySelectorAll('.m-task').length,50);await mobileType('组词');const el=document.querySelector('.m-composer input')!;await act(()=>el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true})));assert.equal(mobileLatest.length,10000);
+});
