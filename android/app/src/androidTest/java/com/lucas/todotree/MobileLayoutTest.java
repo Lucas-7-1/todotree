@@ -44,15 +44,24 @@ public class MobileLayoutTest {
         // Gradle uninstalls the app after connected tests, deleting its external files.
         // Export test-only captures with the instrumentation shell before that cleanup.
         String source=new File(dir,name+".png").getAbsolutePath();
-        ParcelFileDescriptor command=InstrumentationRegistry.getInstrumentation().getUiAutomation()
-            .executeShellCommand("sh -c 'mkdir -p /sdcard/Download/todotree-ui && cp "+source+" /sdcard/Download/todotree-ui/"+name+".png && echo EXPORTED'");
-        try(ParcelFileDescriptor.AutoCloseInputStream stream=new ParcelFileDescriptor.AutoCloseInputStream(command)) {
+        // UiAutomation uses Runtime.exec(String), not a shell parser. Run commands
+        // separately so quoting and && cannot silently turn into mkdir arguments.
+        String destination="/sdcard/Download/todotree-ui/"+name+".png";
+        shell("mkdir -p /sdcard/Download/todotree-ui");
+        shell("cp "+source+" "+destination);
+        String size=shell("stat -c %s "+destination).trim();
+        assertTrue("Screenshot export missing: "+name+" "+size,size.matches("[1-9][0-9]*"));
+    }
+    private String shell(String command) throws Exception {
+        ParcelFileDescriptor pipe=InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command);
+        try(ParcelFileDescriptor.AutoCloseInputStream stream=new ParcelFileDescriptor.AutoCloseInputStream(pipe)) {
             java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();
             byte[] buffer=new byte[1024];int count;
             while((count=stream.read(buffer))!=-1) output.write(buffer,0,count);
-            assertTrue("Screenshot export failed: "+output.toString("UTF-8"),output.toString("UTF-8").contains("EXPORTED"));
+            return output.toString("UTF-8");
         }
     }
+
     private void seed() throws Exception {
         NativeWorkspaceTest helper=new NativeWorkspaceTest();
         NativeWorkspacePlugin plugin=helper.plugin(InstrumentationRegistry.getInstrumentation().getTargetContext());
