@@ -40,6 +40,11 @@ jobs:
           profile: pixel_2
           disable-animations: true
           script: bash -c 'cd android; ./gradlew :app:connectedDebugAndroidTest --no-daemon; test_status=$?; mkdir -p app/build/outputs/mobile-ui; adb pull /sdcard/Download/todotree-ui app/build/outputs/mobile-ui || exit 1; test -s app/build/outputs/mobile-ui/todotree-ui/today-populated.png || exit 1; exit "$test_status"'
+      - name: Verify native screenshots were exported
+        run: |
+          test -s android/app/build/outputs/mobile-ui/todotree-ui/today-populated.png
+          test -s android/app/build/outputs/mobile-ui/todotree-ui/calendar.png
+          test -s android/app/build/outputs/mobile-ui/todotree-ui/keyboard.png
       - name: Preserve Android test reports
         if: always()
         uses: actions/upload-artifact@v4

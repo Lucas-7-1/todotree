@@ -45,9 +45,12 @@ public class MobileLayoutTest {
         // Export test-only captures with the instrumentation shell before that cleanup.
         String source=new File(dir,name+".png").getAbsolutePath();
         ParcelFileDescriptor command=InstrumentationRegistry.getInstrumentation().getUiAutomation()
-            .executeShellCommand("mkdir -p /sdcard/Download/todotree-ui && cp "+source+" /sdcard/Download/todotree-ui/"+name+".png");
+            .executeShellCommand("sh -c 'mkdir -p /sdcard/Download/todotree-ui && cp "+source+" /sdcard/Download/todotree-ui/"+name+".png && echo EXPORTED'");
         try(ParcelFileDescriptor.AutoCloseInputStream stream=new ParcelFileDescriptor.AutoCloseInputStream(command)) {
-            byte[] buffer=new byte[1024];while(stream.read(buffer)!=-1) { /* wait for copy */ }
+            java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();
+            byte[] buffer=new byte[1024];int count;
+            while((count=stream.read(buffer))!=-1) output.write(buffer,0,count);
+            assertTrue("Screenshot export failed: "+output.toString("UTF-8"),output.toString("UTF-8").contains("EXPORTED"));
         }
     }
     private void seed() throws Exception {
