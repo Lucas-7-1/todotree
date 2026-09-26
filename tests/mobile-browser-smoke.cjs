@@ -183,6 +183,7 @@ const assert = require("node:assert/strict");
     await page.evaluate(() =>
       document.documentElement.classList.add("keyboard-open"),
     );
+    await page.locator(".mobile-navigation").waitFor({ state: "hidden" });
     await page.screenshot({ path: `${out}/editor-keyboard-layout.png` });
     await page
       .getByRole("button", { name: "收起新增面板", exact: true })

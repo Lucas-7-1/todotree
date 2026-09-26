@@ -810,17 +810,17 @@ html.mobile-layout .task-toast {
 html.mobile-layout .task-toast button {
   min-height: 40px;
 }
-html.mobile-layout .keyboard-open .mobile-navigation {
+html.mobile-layout.keyboard-open .mobile-navigation {
   display: none;
 }
-html.mobile-layout .keyboard-open .app-shell {
+html.mobile-layout.keyboard-open .app-shell {
   padding-bottom: 0;
 }
-html.mobile-layout .keyboard-open .m-sheet {
+html.mobile-layout.keyboard-open .m-sheet {
   max-height: calc(100dvh - var(--app-safe-top));
   padding-bottom: 12px;
 }
-html.mobile-layout .keyboard-open .task-toast {
+html.mobile-layout.keyboard-open .task-toast {
   bottom: 12px;
 }
 html.mobile-layout .calendar-layout {

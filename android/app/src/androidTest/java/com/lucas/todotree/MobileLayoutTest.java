@@ -130,6 +130,9 @@ public class MobileLayoutTest {
             }
             assertTrue("Real touch must open the software keyboard",keyboard);
             waitUntil(activity,"document.querySelector('.m-composer-line input')===document.activeElement");
+            waitUntil(activity,"getComputedStyle(document.querySelector('.mobile-navigation')).display==='none'");
+            JSONObject keyboardBounds=js(activity,"const r=document.querySelector('.m-composer').getBoundingClientRect();return {bottom:r.bottom,height:innerHeight};");
+            assertTrue(keyboardBounds.toString(),keyboardBounds.getDouble("bottom")<=keyboardBounds.getDouble("height")+1);
             screenshot("keyboard");
             js(activity,"document.querySelector('.m-composer-line input').blur();return {};");
         }
