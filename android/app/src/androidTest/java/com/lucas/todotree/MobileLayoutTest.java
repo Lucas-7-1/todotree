@@ -35,6 +35,8 @@ public class MobileLayoutTest {
         throw new AssertionError("WebView did not render " + selector);
     }
     private void screenshot(String name) throws Exception {
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        SystemClock.sleep(1200); // Wait for the WebView compositor after DOM assertions.
         Bitmap bitmap=InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();
         assertNotNull(bitmap);
         File dir=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null),"screenshots");
@@ -104,11 +106,31 @@ public class MobileLayoutTest {
             js(activity,"document.querySelector('[data-task-id=ui0] .m-task-body').click();return {};");waitFor(activity,"[data-task-id=ui1].is-done");
             assertTrue(js(activity,"return {kept:!!document.querySelector('[data-task-id=ui4]')};").getBoolean("kept"));screenshot("project-retained-branch");
             js(activity,"document.querySelectorAll('.mobile-navigation button')[0].click();return {};");
+            waitUntil(activity,"document.querySelector('.m-heading h1')?.textContent==='今天'");
             js(activity,"document.querySelector('.m-date-link').click();return {};");waitFor(activity,".calendar-day-detail");screenshot("calendar");
             js(activity,"document.querySelector('[aria-label=返回上一级]').click();return {};");
-            js(activity,"document.querySelector('.m-composer-line input').focus();return {};");
-            activity.onActivity(a->{a.getBridge().getWebView().requestFocus();android.view.inputmethod.InputMethodManager imm=(android.view.inputmethod.InputMethodManager)a.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);imm.showSoftInput(a.getBridge().getWebView(),android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);});
-            SystemClock.sleep(700);screenshot("keyboard");
+            waitUntil(activity,"!document.querySelector('.calendar-day-detail') && !!document.querySelector('.m-composer-line input')");
+            JSONObject field=js(activity,"const r=document.querySelector('.m-composer-line input').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,width:innerWidth};");
+            CompletableFuture<float[]> tap=new CompletableFuture<>();
+            activity.onActivity(a->{
+                android.webkit.WebView web=a.getBridge().getWebView();int[] location=new int[2];web.getLocationOnScreen(location);
+                float scale=web.getWidth()/(float)field.optDouble("width");
+                tap.complete(new float[]{location[0]+(float)field.optDouble("x")*scale,location[1]+(float)field.optDouble("y")*scale});
+            });
+            float[] point=tap.get(5,TimeUnit.SECONDS);long down=SystemClock.uptimeMillis();
+            android.view.MotionEvent press=android.view.MotionEvent.obtain(down,down,android.view.MotionEvent.ACTION_DOWN,point[0],point[1],0);
+            android.view.MotionEvent release=android.view.MotionEvent.obtain(down,down+60,android.view.MotionEvent.ACTION_UP,point[0],point[1],0);
+            InstrumentationRegistry.getInstrumentation().sendPointerSync(press);
+            InstrumentationRegistry.getInstrumentation().sendPointerSync(release);press.recycle();release.recycle();
+            boolean keyboard=false;
+            for(int i=0;i<50&&!keyboard;i++) {
+                CompletableFuture<Boolean> visible=new CompletableFuture<>();
+                activity.onActivity(a->{android.view.WindowInsets insets=a.getWindow().getDecorView().getRootWindowInsets();visible.complete(insets!=null&&insets.isVisible(android.view.WindowInsets.Type.ime()));});
+                keyboard=visible.get(5,TimeUnit.SECONDS);if(!keyboard)SystemClock.sleep(100);
+            }
+            assertTrue("Real touch must open the software keyboard",keyboard);
+            waitUntil(activity,"document.querySelector('.m-composer-line input')===document.activeElement");
+            screenshot("keyboard");
             js(activity,"document.querySelector('.m-composer-line input').blur();return {};");
         }
     }
