@@ -135,7 +135,7 @@ export const CompletionCalendar: React.FC<CompletionCalendarProps> = ({
         </div>
 
         {/* Project Filter Selector */}
-        <div className="flex items-center gap-2">
+        <div className="calendar-project-filter flex items-center gap-2">
           <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
             <Filter className="w-3.5 h-3.5" />
             <span>项目:</span>

@@ -487,10 +487,11 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
   const mobile = useMobileLayout();
   const [mobileOptions, setMobileOptions] = useState(false);
   const primaryBtn = getPrimaryButtonProps();
+  const mobilePeriodLabel = { this_week: "本周", last_week: "上周", this_month: "本月", last_month: "上月", custom: "所选周期" }[activeTab];
 
   return (
     <div className="review-workspace flex-1 flex flex-col min-w-0 bg-[#f8fafc] overflow-y-auto">
-      {mobile && <header className="m-review-header"><div><h1>工作复盘</h1><p>{factsPackage.period.label} · {factsPackage.stats.completed_leaf_instances} 项完成</p></div><div className="m-review-actions"><button onClick={() => setMobileOptions(v => !v)}>生成设置</button><button onClick={onOpenHistory}>历史</button><button disabled={primaryBtn.disabled} onClick={primaryBtn.onClick}>{isGenerating ? '生成中…' : primaryBtn.text}</button></div></header>}
+      {mobile && <header className="m-review-header"><div><h1>工作复盘</h1><p>{mobilePeriodLabel} · {factsPackage.stats.completed_leaf_instances} 项任务完成</p></div><div className="m-review-actions"><button onClick={() => setMobileOptions(v => !v)}>生成设置</button><button onClick={onOpenHistory}>历史</button><button disabled={primaryBtn.disabled} onClick={primaryBtn.onClick}>{isGenerating ? '生成中…' : primaryBtn.text}</button></div></header>}
       {/* 1. Compact 1-2 Row Control Console Toolbar (PRD Section 3.2) */}
       <div hidden={mobile && !mobileOptions} className="review-options bg-white border-b border-slate-200/80 px-6 py-2.5 flex-shrink-0 select-none shadow-2xs space-y-2">
         {/* Row 1: Periods, Scope, Templates & Quick Actions */}
@@ -996,25 +997,25 @@ export const WorkReviewView: React.FC<WorkReviewViewProps> = ({
             </article>
           ) : (
             /* Clear Empty State */
-            <div className="bg-white border border-slate-200/90 rounded-2xl p-12 text-center shadow-2xs space-y-4 max-w-lg mx-auto my-12 select-none">
+            <div className="review-empty bg-white border border-slate-200/90 rounded-2xl p-12 text-center shadow-2xs space-y-4 max-w-lg mx-auto my-12 select-none">
               <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
                 <Sparkles className="w-6 h-6" />
               </div>
               <div className="space-y-1">
                 <h3 className="text-base font-bold text-slate-800">
-                  准备生成「{factsPackage.period.label}」复盘报告
+                  {mobile ? "把做过的事，整理成工作成果" : `准备生成「${factsPackage.period.label}」复盘报告`}
                 </h3>
                 <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
-                  基于本地记录的 {factsPackage.completed_records.length} 项已完成事实，使用您设定的提示词模板生成结构化报告。
+                  {mobile ? (factsPackage.completed_records.length > 0 ? `已有 ${factsPackage.completed_records.length} 条完成记录。点击上方生成报告，即可开始整理；背景和备注可稍后补充。` : "本期还没有完成记录。完成任务后，可以在这里整理周报或月报，也可以切换周期查看以前的工作。") : `基于本地记录的 ${factsPackage.completed_records.length} 项已完成事实，使用您设定的提示词模板生成结构化报告。`}
                 </p>
               </div>
-              <button
+              {!mobile && <button
                 onClick={() => handleGenerate(false)}
                 disabled={isGenerating || factsPackage.completed_records.length === 0}
                 className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-xs transition-colors shadow-xs disabled:opacity-50"
               >
                 {factsPackage.completed_records.length === 0 ? '该周期暂无完成记录' : '立即生成报告'}
-              </button>
+              </button>}
             </div>
           )}
         </div>

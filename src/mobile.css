@@ -944,3 +944,33 @@ html.mobile-layout .review-options > div > div {
 html.mobile-layout .review-workspace article button {
   white-space: normal;
 }
+
+html.mobile-layout .calendar-project-filter {
+  width: 100%;
+  min-width: 0;
+}
+html.mobile-layout .calendar-project-filter > span {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+html.mobile-layout .calendar-project-filter select {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  min-height: 44px;
+}
+html.mobile-layout .review-empty {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 28px 12px;
+  margin: 24px auto;
+}
+html.mobile-layout .review-empty h3 {
+  font-size: 1rem;
+}
+html.mobile-layout .review-empty p {
+  font-size: 0.875rem;
+  line-height: 1.8;
+  color: #64748b;
+}
