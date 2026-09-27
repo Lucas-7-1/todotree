@@ -35,7 +35,7 @@ const fs = require('node:fs/promises');
     const root=await journal.get('review-root');await journal.mutate('publish',{entry:{...root,images,cover_attachment_id:images[0]},expected_version:root.version,draft_id:'photos'});
     return {images};
   });
-  await page.getByRole('button',{name:'时间线',exact:true}).click();await page.locator('[data-j-card="review-root"] .j-carousel img').waitFor();
+  await page.getByRole('button',{name:'时间线',exact:true}).click();await page.locator('[data-j-card="review-root"] .j-carousel img').first().waitFor();
   const card=page.locator('[data-j-card="review-root"]');
   await card.locator('.j-photo-rail').evaluate(e=>{e.scrollLeft=e.clientWidth;});
   await page.waitForFunction(()=>document.querySelector('[data-j-card="review-root"] .j-photo-counter')?.textContent==='2 / 3');

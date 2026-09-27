@@ -36,6 +36,7 @@ export function journalIndex(entries: JournalEntry[]) {
     }
   };
   const summary = (e: JournalEntry) => ({...e,
+    other_date_count: descendants(e.id).filter(c=>!c.deleted_at && c.event_date!==e.event_date).length,
     child_count: (children.get(e.id) || []).filter(c => !c.deleted_at).length,
     path: path(e.id).map(p => ({id:p.id,title:journalTitle(p),event_date:p.event_date})),
     description:e.description.slice(0,180), reflection:e.reflection.slice(0,180)

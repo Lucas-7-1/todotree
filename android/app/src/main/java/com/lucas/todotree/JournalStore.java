@@ -236,7 +236,7 @@ public final class JournalStore extends SQLiteOpenHelper {
 
   void putEntry(SQLiteDatabase db, JSONObject e) throws Exception {
     JournalTree.normalize(e);
-    e.remove("path");e.remove("child_count");
+    e.remove("path");e.remove("child_count");e.remove("other_date_count");
     String id = e.getString("id");
     JSONArray images = array(e, "images");
     if (get(db, "books", e.optString("book_id", "daily")) == null) e.put(

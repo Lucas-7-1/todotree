@@ -54,6 +54,7 @@ export default function JournalApp({
   create?: boolean;
 }) {
   const savedView = useRef(readJournalView()).current;
+  const [dayExpanded,setDayExpanded]=useState<Set<string>>(new Set());
   const treeGuard=useRef<(()=>Promise<boolean>)|null>(null);
   const positions=useRef<Record<string,number>>((()=>{try{return JSON.parse(localStorage.getItem('todotree.journal.scroll.v1')||'{}');}catch{return {};}})());
   const scrollTimer=useRef<ReturnType<typeof setTimeout>>();
@@ -284,6 +285,12 @@ export default function JournalApp({
     if(info.count)setConfirm({text:`将移入回收站：1 个事件及 ${info.count} 条细节。可整组撤销。`,run:remove});
     else await remove();
   });
+  const projectedChildren=(e:JournalEntry)=>entries.filter(child=>child.parent_id===e.id&&child.event_date===e.event_date);
+  const projectionRoots=entries.filter(e=>!entries.some(parent=>parent.id===e.parent_id&&parent.event_date===e.event_date));
+  const renderDayDetails=(e:JournalEntry,depth=0):React.ReactNode=><div className="j-day-details">{projectedChildren(e).map(child=><div key={child.id}>
+    <button onClick={()=>void run(async()=>setDetail(await journal.get(child.id)))}><span>{journalTitle(child)}</span><small>{child.event_time||''}{child.images.length?` · ${child.images.length} 张照片`:''}</small><ChevronRight size={15}/></button>
+    {depth<1&&renderDayDetails(child,depth+1)}
+  </div>)}</div>;
   const moreItems = (
     <>
       <button
@@ -678,10 +685,10 @@ export default function JournalApp({
             )}
           </div>
         ) : (
-          entries.map((e, i) => (
+          projectionRoots.map((e, i) => (
             <React.Fragment key={e.id}>
               {timeline &&
-                (i === 0 || entries[i - 1].event_date !== e.event_date) && (
+                (i === 0 || projectionRoots[i - 1].event_date !== e.event_date) && (
                   <h3 className="j-feed-date">{e.event_date}</h3>
                 )}
               <article className="j-card" data-j-card={e.id}>
@@ -710,6 +717,8 @@ export default function JournalApp({
                   </div>
                   {!!e.child_count && <span className="j-card-children">{e.child_count} 条细节 · 展开完整事件 ›</span>}
                 </button>
+                {projectedChildren(e).length>0 && <><button className="j-day-expand" aria-expanded={dayExpanded.has(e.id)} onClick={()=>setDayExpanded(old=>{const next=new Set(old);next.has(e.id)?next.delete(e.id):next.add(e.id);return next;})}>{dayExpanded.has(e.id)?'收起':'展开'}当页 {projectedChildren(e).length} 条细节</button>{dayExpanded.has(e.id)&&renderDayDetails(e)}</>}
+                {!!e.other_date_count && <button className="j-other-days" onClick={()=>void run(async()=>setDetail(await journal.get(e.id)))}>另有 {e.other_date_count} 条其他日期记录 · 查看完整事件</button>}
               </article>
             </React.Fragment>
           ))

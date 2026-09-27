@@ -5,6 +5,7 @@ export interface JournalEntry {
   sort_order: number;
   deletion_batch_id: string | null;
   child_count?: number;
+  other_date_count?: number;
   path?: { id: string; title: string; event_date: string }[];
   event_date: string;
   event_time: string | null;

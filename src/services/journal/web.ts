@@ -64,7 +64,7 @@ export async function journalWeb(o: any): Promise<any> {
       result = await request(table("entries").get(o.id));
       if (!result) throw Error("记录不存在");
       const ix = journalIndex(await request(table('entries').getAll()));
-      result = {...result, child_count:ix.summary(result).child_count, path:ix.summary(result).path};
+      result = {...result, child_count:ix.summary(result).child_count, other_date_count:ix.summary(result).other_date_count, path:ix.summary(result).path};
     } else if (o.action === 'children' || o.action === 'branch') {
       const ix = journalIndex(await request(table('entries').getAll()));
       if (o.action === 'branch') result = {count:ix.descendants(o.id).filter(e=>!e.deleted_at).length};
@@ -128,7 +128,7 @@ export async function journalWeb(o: any): Promise<any> {
     } else if (o.action === "discardDraft") table("drafts").delete(o.id);
     else if (o.action === "publish") {
       const e = normalizeJournal(o.entry as JournalEntry);
-      delete e.child_count; delete e.path;
+      delete e.child_count; delete e.path; delete e.other_date_count;
       validateJournal(e);
       const old = await request(table("entries").get(e.id));
       if ((old?.version || 0) !== o.expected_version || old?.deleted_at)

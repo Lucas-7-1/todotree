@@ -47,7 +47,7 @@ final class JournalTree {
     }
   }
   void validatePublish(JSONObject e, JSONObject old) throws Exception {
-    normalize(e); e.remove("path");e.remove("child_count");
+    normalize(e); e.remove("path");e.remove("child_count");e.remove("other_date_count");
     if(old!=null && (!parent(old).equals(parent(e))||!old.getString("book_id").equals(e.getString("book_id"))))throw new Exception("请通过移动到调整所属事件或手帐本");
     if(old==null) {
       String clause=parent(e).isEmpty()?"parent_id IS NULL":"parent_id=?";
@@ -67,6 +67,9 @@ final class JournalTree {
   JSONObject decorate(JSONObject e, boolean snippet) throws Exception {
     normalize(e);String id=e.getString("id");
     try(Cursor c=db.rawQuery("SELECT COUNT(*) FROM entries WHERE parent_id=? AND deleted_at IS NULL",new String[]{id})){c.moveToFirst();e.put("child_count",c.getInt(0));}
+    int other=0;
+    if(e.optInt("child_count")>0)try(Cursor c=db.rawQuery("WITH RECURSIVE branch(id,event_date,deleted_at) AS (SELECT id,event_date,deleted_at FROM entries WHERE parent_id=? UNION ALL SELECT e.id,e.event_date,e.deleted_at FROM entries e JOIN branch b ON e.parent_id=b.id) SELECT COUNT(*) FROM branch WHERE deleted_at IS NULL AND event_date<>?",new String[]{id,e.getString("event_date")})){c.moveToFirst();other=c.getInt(0);}
+    e.put("other_date_count",other);
     JSONArray path=new JSONArray();List<JSONObject> chain=new ArrayList<>();Set<String> seen=new HashSet<>();seen.add(id);String pid=parent(e);
     while(!pid.isEmpty()) { if(!seen.add(pid))throw new Exception("事件层级存在循环"); JSONObject p=JournalStore.get(db,"entries",pid); if(p==null)break;
       String title=JournalStore.text(p,"title");if(title.isEmpty())title=JournalStore.text(p,"description");if(title.isEmpty())title="一段记录";
