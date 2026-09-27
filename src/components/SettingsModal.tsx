@@ -380,7 +380,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="flex-1 flex items-center justify-center gap-2 py-2 px-3 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl text-xs font-semibold transition-colors"
                   >
                     <Download className="w-4 h-4" />
-                    <span>导出数据备份 (JSON)</span>
+                    <span>导出任务备份 (JSON，不含手帐)</span>
                   </button>
 
                   <button

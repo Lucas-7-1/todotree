@@ -177,4 +177,26 @@ public class MobileLayoutTest {
             js(activity,"document.querySelector('.m-composer-line input').blur();return {};");
         }
     }
+    @Test public void journalNativeCalendarPhotoDraftAndKeyboard() throws Exception {
+        seed();
+        JournalStore store=new JournalStore(InstrumentationRegistry.getInstrumentation().getTargetContext());
+        Bitmap photo=Bitmap.createBitmap(1200,900,Bitmap.Config.ARGB_8888);photo.eraseColor(0xff80a78f);
+        java.io.ByteArrayOutputStream image=new java.io.ByteArrayOutputStream();photo.compress(Bitmap.CompressFormat.PNG,100,image);photo.recycle();
+        String imageId=store.importImage(new java.io.ByteArrayInputStream(image.toByteArray())).getString("id");
+        String today=java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString(),id="journal-ui-"+System.nanoTime();
+        JSONObject entry=new JSONObject().put("id",id).put("book_id","daily").put("event_date",today).put("event_time","15:30").put("event_timezone",java.util.TimeZone.getDefault().getID()).put("title","贵阳的慢生活").put("description","逛青云市集，留下一张照片。").put("reflection","慢慢走很舒服，下次还来。").put("rating",4).put("location_text","贵阳青云市集").put("tags",new org.json.JSONArray().put("旅行")).put("images",new org.json.JSONArray().put(imageId)).put("version",0).put("created_at",JournalStore.now()).put("deleted_at",JSONObject.NULL);
+        store.command(new JSONObject().put("action","publish").put("operation_id",id).put("entry",entry).put("expected_version",0).put("draft_id",id));store.close();
+        try(ActivityScenario<MainActivity> activity=ActivityScenario.launch(MainActivity.class)){
+            waitFor(activity,".mobile-navigation");
+            js(activity,"window.dispatchEvent(new CustomEvent('todotree:journal'));return {};");waitFor(activity,".j-card");
+            waitUntil(activity,"document.querySelector('.j-card img')?.naturalWidth>0");
+            assertTrue(js(activity,"return {fits:document.documentElement.scrollWidth<=innerWidth+1};").getBoolean("fits"));screenshot("journal-calendar");
+            js(activity,"document.querySelector('.j-card').click();return {};");waitFor(activity,".j-detail-photo img");waitUntil(activity,"document.querySelector('.j-detail-photo img').naturalWidth>0");screenshot("journal-detail");
+            js(activity,"document.querySelector('.j-detail .j-text').click();return {};");waitFor(activity,".j-editor");
+            float[] input=point(activity,".j-description");long down=SystemClock.uptimeMillis();motion(down,android.view.MotionEvent.ACTION_DOWN,input);motion(down,android.view.MotionEvent.ACTION_UP,input);SystemClock.sleep(1000);screenshot("journal-editor-keyboard");
+            assertTrue(js(activity,"const r=document.querySelector('.j-editor .j-header').getBoundingClientRect();return {fits:r.bottom<innerHeight&&r.top>=0};").getBoolean("fits"));
+            js(activity,"document.activeElement?.blur();return {};");
+        }
+    }
+
 }

@@ -76,7 +76,11 @@ import {
 } from './services/ai/reportService';
 import { buildFactsPackage } from './services/ai/factsEngine';
 
+const JournalApp = React.lazy(() => import('./components/Journal/JournalApp'));
+
 export const App: React.FC = () => {
+  const [journalState, setJournalState] = useState<{create:boolean}|null>(null);
+  useEffect(() => { const open=(event:Event)=>setJournalState({create:!!(event as CustomEvent).detail?.create});window.addEventListener('todotree:journal',open);return()=>window.removeEventListener('todotree:journal',open); }, []);
   const mobileLayout = useMobileLayout();
   const mobileCommitLock = useRef(false);
   useEffect(() => { document.documentElement.classList.toggle('mobile-layout', mobileLayout); return () => document.documentElement.classList.remove('mobile-layout'); }, [mobileLayout]);
@@ -491,6 +495,7 @@ export const App: React.FC = () => {
   // Global Keyboard Shortcuts (Ctrl+N, Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (document.documentElement.classList.contains('journal-open')) return;
       if (e.isComposing || saveStatus === 'saving' || storageError || !loaded) return;
       const activeEl = document.activeElement;
       const isInput =
@@ -1320,6 +1325,7 @@ export const App: React.FC = () => {
   return (
     <div className="app-shell flex h-screen w-screen overflow-hidden bg-[#f8fafc] text-slate-800">
       {/* 1. Left Sidebar */}
+      {journalState && <React.Suspense fallback={<div className="fixed inset-0 z-[180] bg-white p-8">正在翻开手帐…</div>}><JournalApp create={journalState.create} onClose={() => setJournalState(null)} /></React.Suspense>}
       <Sidebar
         currentView={currentView}
         onViewChange={async (view) => {
@@ -1434,7 +1440,7 @@ export const App: React.FC = () => {
         <div className="flex-1 flex min-h-0 overflow-hidden relative">
           {mobileLayout && <MobileWorkspace tasks={tasks} view={currentView} timezone={settings.timezone}
             saveStatus={saveStatus} disabled={!loaded || !isTabOwner || !!storageError || batchBusy || saveStatus === 'saving'}
-            overlayOpen={auxiliaryPanel.type !== 'none' || isSettingsModalOpen || isCreateModalOpen || isTemplateModalOpen}
+            overlayOpen={!!journalState || auxiliaryPanel.type !== 'none' || isSettingsModalOpen || isCreateModalOpen || isTemplateModalOpen}
             onMove={handleTaskMove} onCreate={handleMobileCreate} onBulk={handleBulkAction} onSelect={handleSelectTask}
             onRestore={handleRestoreTask} onArchive={handleArchiveCompleted} onCompleted={() => openAuxiliaryPanel('completed')}
             onUndo={handleUndo} canUndo={undoManager.canUndo()} onPrepareComplete={closeAuxiliaryPanel}

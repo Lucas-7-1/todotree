@@ -121,6 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
           })}
+          <button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-600" onClick={() => window.dispatchEvent(new CustomEvent('todotree:journal'))}><Calendar size={18}/>生活手帐</button>
         </nav>
       </div>
 

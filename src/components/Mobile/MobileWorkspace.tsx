@@ -1049,6 +1049,7 @@ export function MobileWorkspace(p: Props) {
                   <Check size={19} />
                   全部完成记录
                 </button>
+                {p.view === 'today' && <button onClick={() => { setSheet('none'); window.dispatchEvent(new CustomEvent('todotree:journal',{detail:{create:true}})); }}>＋ 记一笔生活手帐</button>}
                 <button
                   disabled={!p.canUndo || block}
                   onClick={() => {

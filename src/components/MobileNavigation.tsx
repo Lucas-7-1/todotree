@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarDays, ListTodo, LayoutGrid, Sparkles, Menu, X, CheckCircle, Trash2, Settings } from 'lucide-react';
+import { CalendarDays, ListTodo, LayoutGrid, Sparkles, Menu, X, CheckCircle, Trash2, Settings, BookOpen } from 'lucide-react';
 import type { ViewType } from '../types/todo';
 interface Props { currentView: ViewType; onViewChange: (view: ViewType) => void; onOpenSettings: () => void; onOpenCompletedDrawer?: () => void; completedTasksCount: number; trashCount: number }
 export function MobileNavigation(p: Props) {
@@ -19,6 +19,7 @@ export function MobileNavigation(p: Props) {
     {more && <div className="mobile-more-backdrop" onClick={() => setMore(false)}>
       <section className="mobile-more" role="dialog" aria-label="更多功能" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-3"><strong>我的 TodoTree</strong><button onClick={() => setMore(false)} aria-label="关闭更多"><X size={20}/></button></div>
+        <button onClick={() => { setMore(false); window.dispatchEvent(new CustomEvent('todotree:journal')); }}><BookOpen size={19}/>生活手帐 <span>照片与日历</span></button>
         <button onClick={() => { setMore(false); p.onOpenCompletedDrawer?.(); }}><CheckCircle size={19}/>已完成 <span>{p.completedTasksCount}</span></button>
         <button onClick={() => { setMore(false); p.onViewChange('trash'); }}><Trash2 size={19}/>回收站 <span>{p.trashCount}</span></button>
         <button onClick={() => { setMore(false); p.onOpenSettings(); }}><Settings size={19}/>设置与备份</button>
