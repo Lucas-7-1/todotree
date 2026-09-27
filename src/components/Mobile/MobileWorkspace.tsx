@@ -1,3 +1,4 @@
+import { AppModeSwitch } from '../AppModeSwitch';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
@@ -408,6 +409,7 @@ export function MobileWorkspace(p: Props) {
   const dueReason = target ? taskDueDay(target, p.timezone) : null;
   return (
     <section className="m-workspace" hidden={!active} data-mobile-view={p.view}>
+      {!parent && <AppModeSwitch mode="tasks" disabled={busy || pending.size>0} onChange={() => window.dispatchEvent(new CustomEvent('todotree:journal'))} />}
       <header className="m-header">
         {((p.view === "tree" && parentId) || calendar) && (
           <button

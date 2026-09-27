@@ -1,6 +1,11 @@
 export interface JournalEntry {
   id: string;
   book_id: string;
+  parent_id: string | null;
+  sort_order: number;
+  deletion_batch_id: string | null;
+  child_count?: number;
+  path?: { id: string; title: string; event_date: string }[];
   event_date: string;
   event_time: string | null;
   event_timezone: string;
@@ -71,6 +76,9 @@ export function newJournal(date: string, book = "daily"): JournalDraft {
     entry: {
       id: journalId(),
       book_id: book,
+      parent_id: null,
+      sort_order: 0,
+      deletion_batch_id: null,
       event_date: date,
       event_time: null,
       event_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -182,4 +190,14 @@ export function compareJournal(a: JournalEntry, b: JournalEntry) {
     a.created_at.localeCompare(b.created_at) ||
     a.id.localeCompare(b.id)
   );
+}
+
+export function newJournalChild(parent: JournalEntry): JournalDraft {
+  const draft = newJournal(parent.event_date, parent.book_id);
+  draft.entry.parent_id = parent.id;
+  return draft;
+}
+export function journalImageOrder(e: Pick<JournalEntry, 'images' | 'cover_attachment_id'>) {
+  const cover = e.images.includes(e.cover_attachment_id || '') ? e.cover_attachment_id! : e.images[0];
+  return cover ? [cover, ...e.images.filter(id => id !== cover)] : [];
 }

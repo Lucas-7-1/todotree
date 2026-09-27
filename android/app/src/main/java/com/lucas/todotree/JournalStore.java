@@ -21,7 +21,7 @@ public final class JournalStore extends SQLiteOpenHelper {
   private int exports;
 
   public JournalStore(Context context) {
-    super(context, "journal.db", null, 1);
+    super(context, "journal.db", null, 2);
     root = new File(context.getFilesDir(), "journal");
     originals = new File(root, "originals");
     previews = new File(root, "previews");
@@ -36,8 +36,9 @@ public final class JournalStore extends SQLiteOpenHelper {
   @Override
   public void onCreate(SQLiteDatabase db) {
     db.execSQL(
-      "CREATE TABLE entries(id TEXT PRIMARY KEY,book_id TEXT NOT NULL,event_date TEXT NOT NULL,sort_time TEXT NOT NULL,created_at TEXT NOT NULL,deleted_at TEXT,rating INTEGER,has_images INTEGER NOT NULL,search_text TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL)"
+      "CREATE TABLE entries(id TEXT PRIMARY KEY,book_id TEXT NOT NULL,event_date TEXT NOT NULL,sort_time TEXT NOT NULL,created_at TEXT NOT NULL,deleted_at TEXT,rating INTEGER,has_images INTEGER NOT NULL,search_text TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,parent_id TEXT,sort_order REAL NOT NULL DEFAULT 0,deletion_batch_id TEXT)"
     );
+    db.execSQL("CREATE INDEX entries_parent ON entries(parent_id,deleted_at,sort_order,id)");
     db.execSQL(
       "CREATE INDEX entries_date ON entries(deleted_at,event_date,sort_time,created_at,id)"
     );
@@ -74,7 +75,32 @@ public final class JournalStore extends SQLiteOpenHelper {
 
   @Override
   public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-    throw new IllegalStateException("手帐升级尚未定义，原数据已保留");
+    if(oldVersion != 1 || newVersion != 2) throw new IllegalStateException("未知手帐升级，原数据已保留");
+    try {
+      // Recovery archive is made before schema changes, while the old SQLite
+      // transaction and originals are still available. A failure aborts upgrade.
+      JSONObject manifest = new JSONObject().put("format","todotree-journal").put("schema_version",1)
+        .put("exported_at",now()).put("entries",all(db,"entries")).put("books",all(db,"books")).put("drafts",all(db,"drafts"));
+      JSONArray attachments=new JSONArray();
+      try(Cursor c=db.rawQuery("SELECT DISTINCT attachments.body FROM attachments JOIN refs ON attachments.id=refs.attachment_id",null)) {
+        while(c.moveToNext()) attachments.put(new JSONObject(c.getString(0)));
+      }
+      manifest.put("attachments",attachments);
+      File checkpoint=new File(root,"before-tree-upgrade.zip"),temp=new File(root,"before-tree-upgrade.zip.part");
+      try(FileOutputStream file=new FileOutputStream(temp);ZipOutputStream zip=new ZipOutputStream(file)) {
+        zip.putNextEntry(new ZipEntry("manifest.json"));zip.write(manifest.toString().getBytes(StandardCharsets.UTF_8));zip.closeEntry();
+        for(int i=0;i<attachments.length();i++){String id=attachments.getJSONObject(i).getString("id");File image=new File(originals,id);if(!image.isFile())throw new IOException("升级前发现原图缺失，请先恢复备份");zip.putNextEntry(new ZipEntry("media/"+id));try(InputStream in=new FileInputStream(image)){copy(in,zip,IMAGE_LIMIT);}zip.closeEntry();}
+        zip.finish();zip.flush();file.getFD().sync();
+      }
+      if(!temp.renameTo(checkpoint))throw new IOException("无法保存升级检查点");
+      db.execSQL("ALTER TABLE entries ADD COLUMN parent_id TEXT");
+      db.execSQL("ALTER TABLE entries ADD COLUMN sort_order REAL NOT NULL DEFAULT 0");
+      db.execSQL("ALTER TABLE entries ADD COLUMN deletion_batch_id TEXT");
+      db.execSQL("CREATE INDEX entries_parent ON entries(parent_id,deleted_at,sort_order,id)");
+      List<JSONObject> rows=new ArrayList<>();
+      try(Cursor c=db.rawQuery("SELECT body FROM entries ORDER BY event_date DESC,sort_time,created_at,id",null)){while(c.moveToNext())rows.add(new JSONObject(c.getString(0)));}
+      int rank=0;for(JSONObject e:rows){JournalTree.normalize(e);e.put("sort_order",(++rank)*1024);putEntry(db,e);}
+    } catch(Exception e) { throw new IllegalStateException("手帐升级未完成，原库已保留："+e.getMessage(),e); }
   }
 
   static String now() {
@@ -103,7 +129,7 @@ public final class JournalStore extends SQLiteOpenHelper {
     db.insertWithOnConflict(table, null, v, SQLiteDatabase.CONFLICT_REPLACE);
   }
 
-  private static JSONObject get(SQLiteDatabase db, String table, String id)
+  static JSONObject get(SQLiteDatabase db, String table, String id)
     throws Exception {
     try (
       Cursor c = db.query(
@@ -208,7 +234,9 @@ public final class JournalStore extends SQLiteOpenHelper {
     ) throw new Exception("写点内容或添加照片再保存");
   }
 
-  private void putEntry(SQLiteDatabase db, JSONObject e) throws Exception {
+  void putEntry(SQLiteDatabase db, JSONObject e) throws Exception {
+    JournalTree.normalize(e);
+    e.remove("path");e.remove("child_count");
     String id = e.getString("id");
     JSONArray images = array(e, "images");
     if (get(db, "books", e.optString("book_id", "daily")) == null) e.put(
@@ -224,6 +252,9 @@ public final class JournalStore extends SQLiteOpenHelper {
     ContentValues v = new ContentValues();
     v.put("id", id);
     v.put("book_id", e.optString("book_id", "daily"));
+    if(e.isNull("parent_id"))v.putNull("parent_id");else v.put("parent_id",e.getString("parent_id"));
+    v.put("sort_order",e.optDouble("sort_order",0));
+    if(e.isNull("deletion_batch_id"))v.putNull("deletion_batch_id");else v.put("deletion_batch_id",e.getString("deletion_batch_id"));
     v.put("event_date", e.getString("event_date"));
     v.put(
       "sort_time",
@@ -310,6 +341,9 @@ public final class JournalStore extends SQLiteOpenHelper {
   public synchronized JSONObject command(JSONObject o) throws Exception {
     SQLiteDatabase db = getWritableDatabase();
     String action = o.getString("action");
+    JournalTree tree=new JournalTree(this,db);
+    if(action.equals("children"))return tree.children(o);
+    if(action.equals("branch"))return tree.branch(o.getString("id"));
     if (action.equals("boot")) {
       JSONArray drafts = new JSONArray();
       try (
@@ -327,7 +361,7 @@ public final class JournalStore extends SQLiteOpenHelper {
     if (action.equals("get")) {
       JSONObject e = get(db, "entries", o.getString("id"));
       if (e == null) throw new Exception("记录不存在");
-      return e;
+      return tree.decorate(e,false);
     }
     if (action.equals("month")) {
       Query q = filter(o);
@@ -415,7 +449,7 @@ public final class JournalStore extends SQLiteOpenHelper {
             String s = text(e, key);
             e.put(key, s.substring(0, Math.min(180, s.length())));
           }
-          rows.put(e);
+          rows.put(tree.decorate(e,true));
         }
       }
       return new JSONObject()
@@ -440,7 +474,7 @@ public final class JournalStore extends SQLiteOpenHelper {
         new String[] { op }
       )
     ) {
-      if (c.moveToFirst()) return new JSONObject(c.getString(0));
+      if (c.moveToFirst()) return publicResult(new JSONObject(c.getString(0)));
     }
     JSONObject result = new JSONObject();
     db.beginTransaction();
@@ -482,6 +516,7 @@ public final class JournalStore extends SQLiteOpenHelper {
           .put("created_at", old == null ? now() : old.getString("created_at"))
           .put("updated_at", now())
           .put("deleted_at", JSONObject.NULL);
+        tree.validatePublish(e,old);
         putEntry(db, e);
         String draft = o.getString("draft_id");
         db.delete("drafts", "id=?", new String[] { draft });
@@ -489,26 +524,8 @@ public final class JournalStore extends SQLiteOpenHelper {
           draft,
         });
         result = e;
-      } else if (action.equals("delete") || action.equals("restore")) {
-        JSONObject e = get(db, "entries", o.getString("id"));
-        if (e == null) throw new Exception("记录不存在");
-        if (
-          e.getInt("version") != o.getInt("expected_version")
-        ) throw new Exception("记录已变化，请刷新后操作");
-        e.put("deleted_at", action.equals("delete") ? now() : JSONObject.NULL)
-          .put("updated_at", now())
-          .put("version", e.getInt("version") + 1);
-        putEntry(db, e);
-        result = e;
-      } else if (action.equals("purge")) {
-        JSONObject e = get(db, "entries", o.getString("id"));
-        if (e == null || e.isNull("deleted_at")) throw new Exception(
-          "仅回收站记录可永久删除"
-        );
-        db.delete("entries", "id=?", new String[] { e.getString("id") });
-        db.delete("refs", "owner_id=? AND kind='entry'", new String[] {
-          e.getString("id"),
-        });
+      } else if (Arrays.asList("delete","restore","purge","move","undo","setCover").contains(action)) {
+        result=tree.mutate(action,o);
       } else if (action.equals("saveBook")) {
         JSONObject b = o.getJSONObject("book");
         if (
@@ -575,7 +592,11 @@ public final class JournalStore extends SQLiteOpenHelper {
     } finally {
       db.endTransaction();
     }
-    return result;
+    return publicResult(result);
+  }
+
+  static JSONObject publicResult(JSONObject result) throws Exception {
+    JSONObject r=new JSONObject(result.toString());r.remove("undo_before");r.remove("undo_after");return r;
   }
 
   public synchronized void attachToDraft(String draftId, String imageId)
@@ -803,7 +824,7 @@ public final class JournalStore extends SQLiteOpenHelper {
       SQLiteDatabase db = getReadableDatabase();
       manifest = new JSONObject()
         .put("format", "todotree-journal")
-        .put("schema_version", 1)
+        .put("schema_version", 2)
         .put("exported_at", now())
         .put("entries", all(db, "entries"))
         .put("books", all(db, "books"))
@@ -889,7 +910,7 @@ public final class JournalStore extends SQLiteOpenHelper {
       }
       if (
         !manifest.optString("format").equals("todotree-journal") ||
-        manifest.optInt("schema_version") != 1
+        (manifest.optInt("schema_version") != 1 && manifest.optInt("schema_version") != 2)
       ) throw new IOException("不是支持的手帐备份");
       JSONArray media = manifest.getJSONArray("attachments");
       Set<String> ids = new HashSet<>();
@@ -925,6 +946,15 @@ public final class JournalStore extends SQLiteOpenHelper {
             !ids.contains(array(e, "images").getString(k))
           ) throw new IOException("备份附件引用缺失");
         }
+      }
+      Map<String,JSONObject> incomingGraph=new LinkedHashMap<>();
+      JSONArray incomingEntries=manifest.getJSONArray("entries");
+      for(int i=0;i<incomingEntries.length();i++){JSONObject e=incomingEntries.getJSONObject(i);JournalTree.normalize(e);incomingGraph.put(e.getString("id"),e);}
+      JournalTree.validateGraph(incomingGraph);
+      for(int i=0;i<manifest.getJSONArray("drafts").length();i++) {
+        JSONObject e=manifest.getJSONArray("drafts").getJSONObject(i).getJSONObject("entry");JournalTree.normalize(e);
+        // A draft can outlive its parent; preserve it for explicit reassignment.
+        if(incomingGraph.containsKey(text(e,"parent_id"))) {Map<String,JSONObject> check=new LinkedHashMap<>(incomingGraph);check.put(e.getString("id"),e);JournalTree.validateGraph(check);}
       }
       // Repair referenced originals from the fully verified archive before making
       // the recovery checkpoint. Otherwise a missing original would itself block
@@ -973,7 +1003,7 @@ public final class JournalStore extends SQLiteOpenHelper {
             new String[] { operation }
           )
         ) {
-          if (c.moveToFirst()) return new JSONObject(c.getString(0));
+          if (c.moveToFirst()) return publicResult(new JSONObject(c.getString(0)));
         }
         db.beginTransaction();
         int added = 0,
@@ -1012,42 +1042,36 @@ public final class JournalStore extends SQLiteOpenHelper {
           }
           Map<String, String> entryMap = new HashMap<>();
           JSONArray entries = manifest.getJSONArray("entries");
-          for (int i = 0; i < entries.length(); i++) {
-            JSONObject e = entries.getJSONObject(i);
-            String id = e.getString("id");
-            JSONObject existing = get(db, "entries", id);
-            if (
-              existing != null && existing.toString().equals(e.toString())
-            ) continue;
-            if (existing != null) {
-              e.put("id", UUID.randomUUID().toString());
-              String title = text(e, "title");
-              e.put(
-                "title",
-                title.substring(0, Math.min(90, title.length())) +
-                  "（备份副本）"
-              );
-              entryMap.put(id, e.getString("id"));
-              conflicts++;
-            }
-            if (booksMap.containsKey(e.optString("book_id"))) e.put(
-              "book_id",
-              booksMap.get(e.getString("book_id"))
-            );
-            putEntry(db, e);
-            added++;
+          Set<String> cloneRoots=new HashSet<>();
+          Map<String,String> roots=new HashMap<>();
+          for(int i=0;i<entries.length();i++) {
+            JSONObject e=entries.getJSONObject(i);String id=e.getString("id"),rootId=id,pid=text(e,"parent_id");
+            while(!pid.isEmpty()){rootId=pid;pid=text(incomingGraph.get(pid),"parent_id");}roots.put(id,rootId);
+            JSONObject existing=get(db,"entries",id);
+            if(existing!=null){JournalTree.normalize(existing);if(!existing.toString().equals(e.toString()))cloneRoots.add(rootId);}
+            if(booksMap.containsKey(e.getString("book_id")))cloneRoots.add(rootId);
+          }
+          for(int i=0;i<entries.length();i++){String id=entries.getJSONObject(i).getString("id");if(cloneRoots.contains(roots.get(id)))entryMap.put(id,UUID.randomUUID().toString());}
+          for(int i=0;i<entries.length();i++) {
+            JSONObject e=entries.getJSONObject(i);String id=e.getString("id");
+            if(!entryMap.containsKey(id)&&get(db,"entries",id)!=null)continue;
+            if(entryMap.containsKey(id)) {e.put("id",entryMap.get(id));if(id.equals(roots.get(id))){String title=text(e,"title");e.put("title",title.substring(0,Math.min(90,title.length()))+"（备份副本）");}conflicts++;}
+            if(entryMap.containsKey(text(e,"parent_id")))e.put("parent_id",entryMap.get(e.getString("parent_id")));
+            if(booksMap.containsKey(e.optString("book_id")))e.put("book_id",booksMap.get(e.getString("book_id")));
+            putEntry(db,e);added++;
           }
           JSONArray drafts = manifest.getJSONArray("drafts");
           for (int i = 0; i < drafts.length(); i++) {
             JSONObject d = drafts.getJSONObject(i),
               e = d.getJSONObject("entry");
             JSONObject old = get(db, "drafts", d.getString("id"));
-            if (old != null && old.toString().equals(d.toString())) continue;
+            if (old != null && old.toString().equals(d.toString()) && !entryMap.containsKey(e.getString("id")) && !entryMap.containsKey(text(e,"parent_id")) && !booksMap.containsKey(e.optString("book_id"))) continue;
             if (old != null) d.put("id", UUID.randomUUID().toString());
             if (entryMap.containsKey(e.getString("id"))) e.put(
               "id",
               entryMap.get(e.getString("id"))
             );
+            if(entryMap.containsKey(text(e,"parent_id"))) e.put("parent_id",entryMap.get(e.getString("parent_id")));
             if (booksMap.containsKey(e.optString("book_id"))) e.put(
               "book_id",
               booksMap.get(e.getString("book_id"))

@@ -25,6 +25,21 @@ jobs:
           log-accepted-android-sdk-licenses: 'false'
       - run: npm ci
       - run: npm test
+      - name: Browser journal interaction regression
+        run: |
+          npm install --no-save playwright@1.51.1
+          npx playwright install --with-deps chromium
+          node tests/journal-browser-smoke.cjs
+          node tests/journal-tree-browser.cjs
+        env:
+          MOBILE_QA_DIR: /tmp/journal-browser-qa
+      - name: Preserve browser review screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TodoTree-Journal-browser-${{ github.run_number }}
+          path: /tmp/journal-browser-qa/**
+          if-no-files-found: ignore
       - run: npm run android:sync
       - run: chmod +x android/gradlew && cd android && ./gradlew assembleDebug assembleRelease --no-daemon
       - name: Enable emulator acceleration

@@ -1,3 +1,7 @@
+import { AppModeSwitch, rememberMode } from '../AppModeSwitch';
+import { JournalCarousel } from './JournalCarousel';
+import { JournalTree } from './JournalTree';
+function readJournalView(): any { try {return JSON.parse(localStorage.getItem('todotree.journal.view.v1')||'{}');}catch{return {};}}
 import React, {
   useCallback,
   useEffect,
@@ -49,14 +53,18 @@ export default function JournalApp({
   onClose: () => void;
   create?: boolean;
 }) {
+  const savedView = useRef(readJournalView()).current;
+  const treeGuard=useRef<(()=>Promise<boolean>)|null>(null);
+  const positions=useRef<Record<string,number>>((()=>{try{return JSON.parse(localStorage.getItem('todotree.journal.scroll.v1')||'{}');}catch{return {};}})());
+  const scrollTimer=useRef<ReturnType<typeof setTimeout>>();
   const today = journalToday(),
-    [selected, setSelected] = useState(today),
-    [month, setMonth] = useState(today.slice(0, 7)),
-    [week, setWeek] = useState(false),
-    [mode, setMode] = useState<"calendar" | "timeline">("calendar");
+    [selected, setSelected] = useState<string>(savedView.selected && savedView.selected<=today ? savedView.selected:today),
+    [month, setMonth] = useState<string>(/^\d{4}-\d{2}$/.test(savedView.month||'')&&savedView.month<=today.slice(0,7)?savedView.month:today.slice(0,7)),
+    [week, setWeek] = useState(savedView.week !== false),
+    [mode, setMode] = useState<"calendar" | "timeline" | "tree">(["calendar","timeline","tree"].includes(savedView.mode)?savedView.mode:"calendar");
   const [books, setBooks] = useState<JournalBook[]>([]),
     [drafts, setDrafts] = useState<JournalDraft[]>([]),
-    [book, setBook] = useState(""),
+    [book, setBook] = useState<string>(savedView.book || ""),
     [query, setQuery] = useState(""),
     [searching, setSearching] = useState(false),
     [filterOpen, setFilterOpen] = useState(false),
@@ -76,7 +84,7 @@ export default function JournalApp({
     [currentCursor, setCurrentCursor] = useState<JournalCursor | null>(null);
   const [editing, setEditing] = useState<JournalDraft | null>(null),
     [detail, setDetail] = useState<JournalEntry | null>(null),
-    [viewer, setViewer] = useState<{ images: string[]; index: number } | null>(
+    [viewer, setViewer] = useState<{ images: string[]; index: number; entry?:JournalEntry } | null>(
       null,
     ),
     [menu, setMenu] = useState(false),
@@ -94,7 +102,7 @@ export default function JournalApp({
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false),
     [revision, setRevision] = useState(0),
-    [undo, setUndo] = useState<JournalEntry | null>(null),
+    [undo, setUndo] = useState<string | null>(null),
     [bytes, setBytes] = useState<number | null>(null);
   useEffect(() => {
     if (!notice) return;
@@ -110,10 +118,21 @@ export default function JournalApp({
   const scroll = useRef<HTMLDivElement>(null),
     busyRef = useRef(false),
     didCreate = useRef(false);
+  const scrollKey=`${mode}:${book}:${selected}`;
+  const saveScroll=()=>{if(!scroll.current)return;positions.current[scrollKey]=scroll.current.scrollTop;clearTimeout(scrollTimer.current);scrollTimer.current=setTimeout(()=>{try{localStorage.setItem('todotree.journal.scroll.v1',JSON.stringify(Object.fromEntries(Object.entries(positions.current).slice(-30))));}catch{}},250);};
+  useEffect(()=>{if(loading)return;const frame=requestAnimationFrame(()=>scroll.current?.scrollTo({top:positions.current[scrollKey]||0}));return()=>cancelAnimationFrame(frame);},[loading,scrollKey]);
   const refresh = () => setRevision((n) => n + 1);
+  const changed = (message:string, undoId?:string) => {setNotice(message);setUndo(undoId||null);refresh();};
+  useEffect(()=>{ try {localStorage.setItem('todotree.journal.view.v1',JSON.stringify({selected,month,week,mode,book}));} catch {} },[selected,month,week,mode,book]);
+  const leave = async () => { if(busyRef.current || (treeGuard.current && !(await treeGuard.current())))return; onClose(); };
+  const openDetail = async (entry:JournalEntry) => { if(treeGuard.current && !(await treeGuard.current()))return;setDetail(await journal.get(entry.id)); };
+  useEffect(()=>{ if(!detail)return;let live=true;journal.get(detail.id).then(e=>live&&setDetail(e)).catch(()=>{if(live)setDetail(null);});return()=>{live=false;}; },[revision]);
+
   const boot = useCallback(async () => {
     const data = await journal.boot();
     setBooks(data.books);
+    setBook(current=>data.books.some(b=>b.id===current)?current:'');
+    rememberMode('journal');
     setDrafts(
       data.drafts.sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
     );
@@ -227,7 +246,7 @@ export default function JournalApp({
     setSelected(date);
     setMonth(date.slice(0, 7));
   };
-  const closeDetail = () => setDetail(null);
+  const closeDetail = async () => { if(treeGuard.current && !(await treeGuard.current()))return;setDetail(null); };
   const backRef = useRef<() => void>(() => {});
   backRef.current = () => {
     if (busyRef.current) return;
@@ -235,12 +254,12 @@ export default function JournalApp({
     else if (bookManage) setBookManage(false);
     else if (draftList) setDraftList(false);
     else if (menu) setMenu(false);
-    else if (detail) setDetail(null);
+    else if (detail) void closeDetail();
     else if (trash) setTrash(false);
     else if (searching || filterOpen) {
       setSearching(false);
       setFilterOpen(false);
-    } else onClose();
+    } else void leave();
   };
   useEffect(() => {
     const back = (e: Event) => {
@@ -256,17 +275,15 @@ export default function JournalApp({
   const fullGrid = monthGrid(month);
   const weekStart = Math.floor(Math.max(0, fullGrid.indexOf(selected)) / 7) * 7;
   const grid = week ? fullGrid.slice(weekStart, weekStart + 7) : fullGrid;
-  const deleteEntry = (entry: JournalEntry) =>
-    run(async () => {
-      const removed = await journal.mutate("delete", {
-        id: entry.id,
-        expected_version: entry.version,
-      });
-      setDetail(null);
-      setUndo(removed);
-      setNotice("已移入手帐回收站");
-      refresh();
-    });
+  const deleteEntry = (entry: JournalEntry) => run(async () => {
+    const info=await journal.branch(entry.id);
+    const remove=async()=>{
+      const removed=await journal.mutate('delete',{id:entry.id,expected_version:entry.version,expected_count:info.count});
+      setDetail(null);changed('已移入手帐回收站',removed.operation_id);
+    };
+    if(info.count)setConfirm({text:`将移入回收站：1 个事件及 ${info.count} 条细节。可整组撤销。`,run:remove});
+    else await remove();
+  });
   const moreItems = (
     <>
       <button
@@ -337,12 +354,14 @@ export default function JournalApp({
   );
   return (
     <section className="j-shell" aria-label="生活手帐">
+      {!detail && !editing && !trash && <AppModeSwitch mode="journal" disabled={busy} onChange={()=>void leave()} /> }
       <header className="j-header">
         <button
           className="j-icon"
+          hidden={!trash}
           aria-label={trash ? "退出手帐回收站" : "返回任务"}
           disabled={busy}
-          onClick={() => (trash ? setTrash(false) : onClose())}
+          onClick={() => (trash ? setTrash(false) : void leave())}
         >
           <ArrowLeft />
         </button>
@@ -400,6 +419,7 @@ export default function JournalApp({
             >
               时间线
             </button>
+            <button aria-pressed={mode==='tree'} onClick={()=>{setMode('tree');setQuery('');setFrom('');setTo('');setPhotos('all');setRating('');setMaxRating('');}}>事件树</button>
           </div>
         )}
         <button className="j-text" onClick={() => setFilterOpen((v) => !v)}>
@@ -517,8 +537,8 @@ export default function JournalApp({
           正在处理，请勿关闭应用…
         </div>
       )}
-      <div className="j-scroll" ref={scroll}>
-        {!trash && !timeline && (
+      <div className="j-scroll" ref={scroll} onScroll={saveScroll}>
+        {!trash && !timeline && mode!=="tree" && (
           <section className="j-calendar" aria-label="手帐日历">
             <div className="j-month-title">
               <strong>
@@ -581,7 +601,7 @@ export default function JournalApp({
             </div>
             <div className="j-month-stats">
               <span>
-                记录 {summary.days.length} 天 · {summary.count} 件事 ·{" "}
+                记录 {summary.days.length} 天 · {summary.count} 条记录 ·{" "}
                 {summary.image_count} 张照片
               </span>
               <button onClick={() => setWeek((v) => !v)}>
@@ -612,7 +632,7 @@ export default function JournalApp({
                   ? "今天的记录"
                   : `${Number(selected.slice(5, 7))} 月 ${Number(selected.slice(-2))} 日`}
           </h2>
-          {!trash && !timeline && (
+          {!trash && !timeline && mode!=="tree" && (
             <button
               className="j-text"
               onClick={() => setEditing(newJournal(selected, book || "daily"))}
@@ -621,7 +641,7 @@ export default function JournalApp({
             </button>
           )}
         </div>
-        {loading ? (
+        {mode==='tree' && !activeSearch && !trash ? (detail ? null : <JournalTree root={null} book={book} books={books} revision={revision} onOpen={e=>void openDetail(e).catch(err=>setError(err.message))} onEditDraft={setEditing} onChange={changed} guard={treeGuard}/>) : loading ? (
           <div className="j-empty">正在翻开手帐…</div>
         ) : entries.length === 0 ? (
           <div className="j-empty">
@@ -664,19 +684,10 @@ export default function JournalApp({
                 (i === 0 || entries[i - 1].event_date !== e.event_date) && (
                   <h3 className="j-feed-date">{e.event_date}</h3>
                 )}
-              <button
-                className="j-card"
-                onClick={() =>
-                  void run(async () => setDetail(await journal.get(e.id)))
-                }
-              >
-                {e.images.length > 0 && (
-                  <div className="j-cover">
-                    <JournalImage id={e.cover_attachment_id || e.images[0]} />
-                    <span>{e.images.length} 张</span>
-                  </div>
-                )}
-                <div className="j-card-body">
+              <article className="j-card" data-j-card={e.id}>
+                {e.path && e.path.length>0 && <button className="j-card-path" onClick={()=>void run(async()=>setDetail(await journal.get(e.path![0].id)))}>{e.path.map(p=>p.title).join(' / ')} · 查看完整事件</button>}
+                <JournalCarousel entry={e} onOpen={(images,index)=>setViewer({images,index,entry:e})}/>
+                <button className="j-card-body" onClick={()=>void run(async()=>setDetail(await journal.get(e.id)))}>
                   <small>
                     {e.event_time || "未标时间"}
                     {e.location_text ? ` · ${e.location_text}` : ""}
@@ -697,12 +708,13 @@ export default function JournalApp({
                       </span>
                     )}
                   </div>
-                </div>
-              </button>
+                  {!!e.child_count && <span className="j-card-children">{e.child_count} 条细节 · 展开完整事件 ›</span>}
+                </button>
+              </article>
             </React.Fragment>
           ))
         )}
-        {(pages.length > 0 || cursor) && (
+        {mode!=="tree" && (pages.length > 0 || cursor) && (
           <div className="j-pagination">
             <button
               disabled={!pages.length}
@@ -750,12 +762,9 @@ export default function JournalApp({
             <button
               onClick={() =>
                 void run(async () => {
-                  await journal.mutate("restore", {
-                    id: undo.id,
-                    expected_version: undo.version,
-                  });
+                  await journal.mutate("undo", {undo_id:undo});
                   setUndo(null);
-                  setNotice("已恢复记录");
+                  setNotice("已撤销操作");
                   refresh();
                 })
               }
@@ -809,7 +818,7 @@ export default function JournalApp({
               <button
                 key={id}
                 className="j-detail-photo"
-                onClick={() => setViewer({ images: detail.images, index: i })}
+                onClick={() => setViewer({ images: detail.images, index: i, entry:detail })}
               >
                 <JournalImage id={id} large />
               </button>
@@ -836,6 +845,7 @@ export default function JournalApp({
               记录于 {new Date(detail.created_at).toLocaleString("zh-CN")} ·
               事件日期 {detail.event_date}
             </p>
+            {!detail.deleted_at && <JournalTree root={detail} book={detail.book_id} books={books} revision={revision} onOpen={e=>void openDetail(e).catch(err=>setError(err.message))} onEditDraft={setEditing} onChange={changed} guard={treeGuard}/>}
             {detail.deleted_at ? (
               <div className="j-detail-actions">
                 <button
@@ -843,12 +853,12 @@ export default function JournalApp({
                   disabled={busy}
                   onClick={() =>
                     void run(async () => {
-                      await journal.mutate("restore", {
+                      const recovered = await journal.mutate("restore", {
                         id: detail.id,
                         expected_version: detail.version,
                       });
                       setDetail(null);
-                      setNotice("已恢复到原日期");
+                      setNotice(recovered.restored_as_root ? "原父事件已不可用，已恢复为独立事件" : "已恢复到原日期");
                       refresh();
                     })
                   }
@@ -859,7 +869,7 @@ export default function JournalApp({
                   className="j-danger"
                   onClick={() =>
                     setConfirm({
-                      text: "永久删除这条记录？独占的原图会在后台清理，无法撤销。",
+                      text: "永久删除这条记录及其回收站内细节？独占原图会在后台清理，无法撤销。",
                       run: async () => {
                         await journal.mutate("purge", { id: detail.id });
                         setDetail(null);
@@ -1088,6 +1098,7 @@ export default function JournalApp({
           }}
           onSaved={(e) => {
             setEditing(null);
+            if(e.parent_id) {void journal.get(e.parent_id).then(setDetail).catch(()=>setDetail(null));setNotice('已保存细节');refresh();return;}
             setDetail(null);
             setTrash(false);
             pickDate(e.event_date);
@@ -1104,7 +1115,12 @@ export default function JournalApp({
           }}
         />
       )}
-      {viewer && <JournalViewer {...viewer} onClose={() => setViewer(null)} />}
+      {viewer && <JournalViewer {...viewer} coverId={viewer.entry?.cover_attachment_id||viewer.entry?.images[0]||null} onClose={() => setViewer(null)}
+        onSetCover={viewer.entry && !viewer.entry.deleted_at ? async (id)=>{
+          const fresh=await journal.get(viewer.entry!.id);
+          const result=await journal.mutate('setCover',{id:fresh.id,expected_version:fresh.version,attachment_id:id});
+          setViewer(v=>v?{...v,entry:{...fresh,cover_attachment_id:id,version:result.version}}:v);changed('已设为封面',result.operation_id);
+        }:undefined}/>}
       {confirm && (
         <div className="j-modal-backdrop j-confirm">
           <section className="j-modal" role="alertdialog">

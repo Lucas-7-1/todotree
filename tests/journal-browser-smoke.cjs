@@ -9,6 +9,7 @@ const fs = require("node:fs/promises");
   await server.listen();
   const browser = await chromium.launch({
     headless: true,
+    executablePath: process.env.CHROMIUM_PATH || undefined,
     args: ["--no-sandbox"],
   });
   const context = await browser.newContext({
@@ -24,7 +25,7 @@ const fs = require("node:fs/promises");
   await fs.mkdir(out, { recursive: true });
   try {
     await page.goto("http://127.0.0.1:4181");
-    await page.locator(".mobile-navigation").waitFor();
+    await page.locator(".mobile-navigation").waitFor({state:"attached"});
     const workspace = () =>
       page.evaluate(
         async () =>
@@ -73,7 +74,7 @@ const fs = require("node:fs/promises");
       );
       await page.screenshot({ path: `${out}/calendar-${width}.png` });
     }
-    await page.locator(".j-card").click();
+    await page.locator(".j-card-body").click();
     await page.locator(".j-detail-photo img").waitFor();
     assert.ok(
       (await page.locator(".j-detail").innerText()).includes("这次体验 4 分"),
@@ -89,7 +90,7 @@ const fs = require("node:fs/promises");
       .getByRole("button", { name: "2026-01-15，1 条记录", exact: true })
       .waitFor();
     await page.reload();
-    await page.locator(".mobile-navigation").waitFor();
+    await page.locator(".mobile-navigation").waitFor({state:"attached"});
     await page.evaluate(() =>
       window.dispatchEvent(new CustomEvent("todotree:journal")),
     );
@@ -103,7 +104,7 @@ const fs = require("node:fs/promises");
     await page.getByLabel("搜索手帐内容", { exact: true }).fill("慢生活");
     await page.waitForTimeout(300);
     assert.equal(await page.locator(".j-card").count(), 1);
-    await page.locator(".j-card").click();
+    await page.locator(".j-card-body").click();
     await page.getByRole("button", { name: "移入回收站", exact: true }).click();
     await page.locator(".j-card").waitFor({ state: "hidden" });
     await page
@@ -118,7 +119,7 @@ const fs = require("node:fs/promises");
       .click();
     await page.locator(".j-draft-banner").waitFor();
     await page.reload();
-    await page.locator(".mobile-navigation").waitFor();
+    await page.locator(".mobile-navigation").waitFor({state:"attached"});
     await page.evaluate(() =>
       window.dispatchEvent(new CustomEvent("todotree:journal")),
     );

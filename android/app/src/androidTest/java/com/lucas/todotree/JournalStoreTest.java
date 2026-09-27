@@ -337,4 +337,74 @@ public class JournalStoreTest {
     assertEquals("daily", result.getString("book_id"));
     store.close();
   }
+
+  @Test public void treeMoveUndoAndCrossDayRecords() throws Exception {
+    JournalStore s=new JournalStore(context("journal-tree-"+System.nanoTime()));
+    JSONObject a=publish(s,entry("a")),b=publish(s,entry("b"));
+    JSONObject c=publish(s,entry("c").put("parent_id","a").put("event_date","2026-01-02"));
+    JSONObject d=publish(s,entry("d").put("parent_id","c"));
+    assertEquals(1,s.command(op("children").put("parent_id","a")).getInt("total"));
+    JSONObject move=op("move").put("id","c").put("expected_version",1).put("parent_id","b").put("book_id","daily");
+    s.command(move);s.command(move); // idempotency
+    assertEquals("b",s.command(op("get").put("id","c")).getString("parent_id"));
+    assertEquals("2026-01-02",s.command(op("get").put("id","c")).getString("event_date"));
+    assertEquals("b",s.command(op("get").put("id","d")).getJSONArray("path").getJSONObject(0).getString("id"));
+    s.command(op("undo").put("undo_id",move.getString("operation_id")));
+    assertEquals("a",s.command(op("get").put("id","c")).getString("parent_id"));
+    assertEquals(1,s.command(op("month").put("date","2026-01-02")).getInt("count"));
+    try{s.command(op("move").put("id","a").put("expected_version",1).put("parent_id","d").put("book_id","daily"));fail("cycle accepted");}catch(Exception expected){assertTrue(expected.getMessage().contains("自身"));}
+    s.close();
+  }
+  @Test public void treeDeleteRestoreDoesNotReviveOlderTrash() throws Exception {
+    JournalStore s=new JournalStore(context("journal-delete-tree-"+System.nanoTime()));
+    publish(s,entry("root"));publish(s,entry("old").put("parent_id","root"));publish(s,entry("live").put("parent_id","root"));
+    s.command(op("delete").put("id","old").put("expected_version",1));
+    JSONObject deleted=s.command(op("delete").put("id","root").put("expected_version",1).put("expected_count",1));
+    assertEquals(0,s.command(op("list")).getJSONArray("entries").length());
+    s.command(op("restore").put("id","root").put("expected_version",deleted.getInt("version")));
+    assertTrue(s.command(op("get").put("id","live")).isNull("deleted_at"));
+    assertFalse(s.command(op("get").put("id","old")).isNull("deleted_at"));
+    assertEquals(2,s.command(op("month")).getInt("count"));s.close();
+  }
+  @Test public void treeBackupConflictCopiesWholeComponentAndRemapsDrafts() throws Exception {
+    JournalStore s=new JournalStore(context("journal-tree-backup-"+System.nanoTime()));
+    JSONObject root=publish(s,entry("root"));publish(s,entry("child").put("parent_id","root"));
+    JSONObject draft=new JSONObject().put("id","draft-child-detail").put("entry",entry("draft-new").put("parent_id","child")).put("base_version",0);
+    s.command(op("saveDraft").put("draft",draft));
+    ByteArrayOutputStream bytes=new ByteArrayOutputStream();s.exportZip(bytes);
+    root.put("description","修改后的正文");publish(s,root);
+    JSONObject imported=s.importZip(new ByteArrayInputStream(bytes.toByteArray()));assertEquals(2,imported.getInt("added"));
+    JSONArray rows=s.command(op("children").put("parent_id",JSONObject.NULL)).getJSONArray("entries");String copiedRoot="";
+    for(int i=0;i<rows.length();i++)if(!rows.getJSONObject(i).getString("id").equals("root"))copiedRoot=rows.getJSONObject(i).getString("id");
+    assertFalse(copiedRoot.isEmpty());JSONArray children=s.command(op("children").put("parent_id",copiedRoot)).getJSONArray("entries");assertEquals(1,children.length());assertNotEquals("child",children.getJSONObject(0).getString("id"));
+    JSONArray drafts=s.command(op("boot")).getJSONArray("drafts");boolean found=false;
+    for(int i=0;i<drafts.length();i++)if(children.getJSONObject(0).getString("id").equals(drafts.getJSONObject(i).getJSONObject("entry").optString("parent_id")))found=true;
+    assertTrue("Imported draft must attach to copied child",found);s.close();
+  }
+  @Test public void treeDepthChecksCompleteSubtree() throws Exception {
+    JournalStore s=new JournalStore(context("journal-tree-depth-"+System.nanoTime()));
+    String parent="";for(int i=1;i<=5;i++){JSONObject e=entry("level"+i);if(!parent.isEmpty())e.put("parent_id",parent);publish(s,e);parent=e.getString("id");}
+    try{publish(s,entry("sixth").put("parent_id",parent));fail("sixth level accepted");}catch(Exception expected){assertTrue(expected.getMessage().contains("5 层"));}
+    assertEquals(5,s.command(op("month")).getInt("count"));s.close();
+  }
+
+  @Test public void flatV1DatabaseMigratesWithoutLosingRecordOrDraft() throws Exception {
+    Context c=context("journal-v1-upgrade-"+System.nanoTime());
+    SQLiteDatabase db=c.openOrCreateDatabase("journal.db",0,null);
+    db.execSQL("CREATE TABLE entries(id TEXT PRIMARY KEY,book_id TEXT NOT NULL,event_date TEXT NOT NULL,sort_time TEXT NOT NULL,created_at TEXT NOT NULL,deleted_at TEXT,rating INTEGER,has_images INTEGER NOT NULL,search_text TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL)");
+    db.execSQL("CREATE TABLE books(id TEXT PRIMARY KEY,body TEXT NOT NULL)");
+    db.execSQL("CREATE TABLE attachments(id TEXT PRIMARY KEY,body TEXT NOT NULL)");
+    db.execSQL("CREATE TABLE refs(owner_id TEXT NOT NULL,kind TEXT NOT NULL,attachment_id TEXT NOT NULL,PRIMARY KEY(owner_id,kind,attachment_id))");
+    db.execSQL("CREATE TABLE drafts(id TEXT PRIMARY KEY,updated_at TEXT NOT NULL,body TEXT NOT NULL)");
+    db.execSQL("CREATE TABLE operations(id TEXT PRIMARY KEY,result TEXT NOT NULL)");
+    JSONObject old=entry("legacy").put("version",1),draft=new JSONObject().put("id","legacy-draft").put("entry",entry("draft-new")).put("base_version",0);
+    db.execSQL("INSERT INTO books VALUES(?,?)",new Object[]{"daily",new JSONObject().put("id","daily").put("name","日常").put("created_at",JournalStore.now()).toString()});
+    db.execSQL("INSERT INTO entries VALUES(?,?,?,?,?,?,?,?,?,?,?)",new Object[]{"legacy","daily","2026-01-01","99:99",old.getString("created_at"),null,null,0,"散步",1,old.toString()});
+    db.execSQL("INSERT INTO drafts VALUES(?,?,?)",new Object[]{"legacy-draft",JournalStore.now(),draft.toString()});db.setVersion(1);db.close();
+    JournalStore upgraded=new JournalStore(c);JSONObject restored=upgraded.command(op("get").put("id","legacy"));
+    assertTrue(restored.isNull("parent_id"));assertEquals(old.getString("description"),restored.getString("description"));assertEquals(old.getString("event_date"),restored.getString("event_date"));
+    assertEquals(1,upgraded.command(op("boot")).getJSONArray("drafts").length());assertTrue(new File(upgraded.root,"before-tree-upgrade.zip").isFile());
+    publish(upgraded,entry("first-child").put("parent_id","legacy"));assertEquals(1,upgraded.command(op("children").put("parent_id","legacy")).getInt("total"));upgraded.close();
+    upgraded=new JournalStore(c);assertEquals(2,upgraded.command(op("month")).getInt("count"));upgraded.close();
+  }
 }

@@ -1,3 +1,4 @@
+import { AppModeSwitch, readMode, rememberMode } from './components/AppModeSwitch';
 import { applyTaskMove, TaskMove } from './services/taskMove';
 import { MobileWorkspace } from './components/Mobile/MobileWorkspace';
 import { useMobileLayout } from './components/Mobile/useMobile';
@@ -79,8 +80,8 @@ import { buildFactsPackage } from './services/ai/factsEngine';
 const JournalApp = React.lazy(() => import('./components/Journal/JournalApp'));
 
 export const App: React.FC = () => {
-  const [journalState, setJournalState] = useState<{create:boolean}|null>(null);
-  useEffect(() => { const open=(event:Event)=>setJournalState({create:!!(event as CustomEvent).detail?.create});window.addEventListener('todotree:journal',open);return()=>window.removeEventListener('todotree:journal',open); }, []);
+  const [journalState, setJournalState] = useState<{create:boolean}|null>(() => readMode() === 'journal' ? {create:false} : null);
+  useEffect(() => { const open=async(event:Event)=>{ if (pendingNavigationGuard.current && !(await pendingNavigationGuard.current())) return; setJournalState({create:!!(event as CustomEvent).detail?.create}); };window.addEventListener('todotree:journal',open);return()=>window.removeEventListener('todotree:journal',open); }, []);
   const mobileLayout = useMobileLayout();
   const mobileCommitLock = useRef(false);
   useEffect(() => { document.documentElement.classList.toggle('mobile-layout', mobileLayout); return () => document.documentElement.classList.remove('mobile-layout'); }, [mobileLayout]);
@@ -88,7 +89,8 @@ export const App: React.FC = () => {
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
   const [settings, setSettings] = useState<AppSettings>(loadSettingsFromStorage());
-  const [currentView, setCurrentView] = useState<ViewType>(mobileLayout ? 'today' : 'tree');
+  const [currentView, setCurrentView] = useState<ViewType>(() => { try { const v=localStorage.getItem('todotree.task-view.v1'); if(['today','tree','quadrant','review'].includes(v || ''))return v as ViewType; } catch {} return mobileLayout ? 'today':'tree'; });
+  useEffect(() => { try { localStorage.setItem('todotree.task-view.v1',currentView); } catch {} }, [currentView]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [quickInputParentId, setQuickInputParentId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1325,7 +1327,7 @@ export const App: React.FC = () => {
   return (
     <div className="app-shell flex h-screen w-screen overflow-hidden bg-[#f8fafc] text-slate-800">
       {/* 1. Left Sidebar */}
-      {journalState && <React.Suspense fallback={<div className="fixed inset-0 z-[180] bg-white p-8">正在翻开手帐…</div>}><JournalApp create={journalState.create} onClose={() => setJournalState(null)} /></React.Suspense>}
+      {journalState && <React.Suspense fallback={<div className="fixed inset-0 z-[180] bg-white p-8">正在翻开手帐…</div>}><JournalApp create={journalState.create} onClose={() => { rememberMode('tasks'); setJournalState(null); }} /></React.Suspense>}
       <Sidebar
         currentView={currentView}
         onViewChange={async (view) => {
@@ -1352,6 +1354,7 @@ export const App: React.FC = () => {
 
       {/* 2. Middle Main Workspace */}
       <main className="main-workspace flex-1 flex flex-col min-w-0 h-screen overflow-hidden relative">
+        {(!mobileLayout || !['today','tree','quadrant'].includes(currentView)) && <AppModeSwitch mode="tasks" onChange={() => window.dispatchEvent(new CustomEvent('todotree:journal'))} />}
         {/* Reconnection Alert Banner (Bounded Auto-Recovery & Diagnostic actions) */}
         {isServerDisconnected && (
           <div

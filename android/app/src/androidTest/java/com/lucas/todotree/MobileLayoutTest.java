@@ -188,7 +188,7 @@ public class MobileLayoutTest {
         store.command(new JSONObject().put("action","publish").put("operation_id",id).put("entry",entry).put("expected_version",0).put("draft_id",id));store.close();
         try(ActivityScenario<MainActivity> activity=ActivityScenario.launch(MainActivity.class)){
             waitFor(activity,".mobile-navigation");
-            js(activity,"window.dispatchEvent(new CustomEvent('todotree:journal'));return {};");waitFor(activity,".j-card");
+            js(activity,"localStorage.removeItem('todotree.journal.view.v1');window.dispatchEvent(new CustomEvent('todotree:journal'));return {};");waitFor(activity,".j-card");
             assertTrue(js(activity,"return {fits:document.documentElement.scrollWidth<=innerWidth+1};").getBoolean("fits"));screenshot("journal-calendar");
             // A six-week month can place the first photo below the scrolling viewport.
             // Bring it on screen before asserting the deliberately lazy image loaded.
@@ -199,7 +199,7 @@ public class MobileLayoutTest {
                 throw new AssertionError(js(activity,"return {card:document.querySelector('.j-card')?.outerHTML,platform:window.Capacitor?.getPlatform(),height:innerHeight};").toString(), failure);
             }
             screenshot("journal-photo-card");
-            js(activity,"document.querySelector('.j-card').click();return {};");waitFor(activity,".j-detail-photo img");waitUntil(activity,"document.querySelector('.j-detail-photo img').naturalWidth>0");screenshot("journal-detail");
+            js(activity,"document.querySelector('.j-card-body').click();return {};");waitFor(activity,".j-detail-photo img");waitUntil(activity,"document.querySelector('.j-detail-photo img').naturalWidth>0");screenshot("journal-detail");
             js(activity,"document.querySelector('.j-detail .j-text').click();return {};");waitFor(activity,".j-editor");
             float[] input=point(activity,".j-description");long down=SystemClock.uptimeMillis();motion(down,android.view.MotionEvent.ACTION_DOWN,input);motion(down,android.view.MotionEvent.ACTION_UP,input);SystemClock.sleep(1000);screenshot("journal-editor-keyboard");
             assertTrue(js(activity,"const r=document.querySelector('.j-editor .j-header').getBoundingClientRect();return {fits:r.bottom<innerHeight&&r.top>=0};").getBoolean("fits"));

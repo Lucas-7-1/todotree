@@ -300,6 +300,9 @@ export function JournalEditor(p: Props) {
           />
           {e.event_date < journalToday(e.event_timezone) && <span>补记</span>}
         </label>
+        {e.parent_id && <div className="j-muted">此条是事件细节，日期独立保存。
+          {draft.base_version===0 && <button className="j-text" onClick={()=>update({parent_id:null})}>改为独立事件</button>}
+        </div>}
         {error && (
           <div className="j-error" role="alert">
             {error}
@@ -424,6 +427,7 @@ export function JournalEditor(p: Props) {
             收进哪本手帐
             <select
               aria-label="所属手帐本"
+              disabled={draft.base_version>0 || !!e.parent_id}
               value={e.book_id}
               onChange={(ev) => update({ book_id: ev.target.value })}
             >
@@ -439,6 +443,7 @@ export function JournalEditor(p: Props) {
             <div className="j-inline">
               <input
                 aria-label="新手帐本名称"
+                disabled={draft.base_version>0 || !!e.parent_id}
                 placeholder="例如：贵阳之旅"
                 maxLength={60}
                 value={bookName}
@@ -456,7 +461,7 @@ export function JournalEditor(p: Props) {
                       },
                     });
                     await p.onBook();
-                    update({ book_id: b.id });
+                    if(draft.base_version===0&&!e.parent_id)update({ book_id: b.id });
                     setBookName("");
                   } catch (err) {
                     setError((err as Error).message);
