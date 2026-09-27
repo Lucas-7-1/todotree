@@ -285,4 +285,45 @@ public class JournalStoreTest {
     );
     s.close();
   }
+
+  @Test
+  public void deletingBookKeepsPublishedEntriesAndEditableDrafts()
+    throws Exception {
+    JournalStore store = new JournalStore(
+      context("journal-book-" + System.nanoTime())
+    );
+    store.command(
+      op("saveBook").put(
+        "book",
+        new JSONObject().put("id", "trip").put("name", "贵阳之旅")
+      )
+    );
+    JSONObject saved = publish(
+      store,
+      entry("book-event").put("book_id", "trip")
+    );
+    JSONObject draft = new JSONObject()
+      .put("id", "editing-trip")
+      .put(
+        "entry",
+        new JSONObject(saved.toString()).put("reflection", "草稿中的新感受")
+      )
+      .put("base_version", saved.getInt("version"));
+    store.command(op("saveDraft").put("draft", draft));
+    store.command(op("deleteBook").put("id", "trip"));
+    JSONObject kept = store
+      .command(op("boot"))
+      .getJSONArray("drafts")
+      .getJSONObject(0);
+    assertEquals("daily", kept.getJSONObject("entry").getString("book_id"));
+    JSONObject result = store.command(
+      op("publish")
+        .put("entry", kept.getJSONObject("entry"))
+        .put("draft_id", kept.getString("id"))
+        .put("expected_version", kept.getInt("base_version"))
+    );
+    assertEquals("草稿中的新感受", result.getString("reflection"));
+    assertEquals("daily", result.getString("book_id"));
+    store.close();
+  }
 }

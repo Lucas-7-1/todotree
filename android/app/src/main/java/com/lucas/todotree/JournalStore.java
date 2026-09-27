@@ -543,6 +543,25 @@ public final class JournalStore extends SQLiteOpenHelper {
             .put("updated_at", now());
           putEntry(db, e);
         }
+        JSONArray drafts = all(db, "drafts");
+        for (int i = 0; i < drafts.length(); i++) {
+          JSONObject d = drafts.getJSONObject(i),
+            e = d.getJSONObject("entry");
+          if (!id.equals(e.optString("book_id"))) continue;
+          e.put("book_id", "daily");
+          JSONObject current = get(db, "entries", e.getString("id"));
+          if (
+            current != null &&
+            d.optInt("base_version") == current.getInt("version") - 1
+          ) {
+            d.put("base_version", current.getInt("version"));
+          }
+          ContentValues draftValues = new ContentValues();
+          draftValues.put("body", d.toString());
+          db.update("drafts", draftValues, "id=?", new String[] {
+            d.getString("id"),
+          });
+        }
         db.delete("books", "id=?", new String[] { id });
         db.delete("refs", "owner_id=? AND kind='book'", new String[] { id });
       } else throw new Exception("未知手帐操作");

@@ -48,7 +48,11 @@ const fs = require("node:fs/promises");
       .fill("慢慢走很舒服，下次还来");
     const choosing = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: "添加照片", exact: true }).click();
-    await (await choosing).setFiles(require("node:path").join(__dirname, "fixtures/journal-photo.png"));
+    await (
+      await choosing
+    ).setFiles(
+      require("node:path").join(__dirname, "fixtures/journal-photo.png"),
+    );
     await page.locator(".j-photo-grid img").waitFor();
     await page
       .getByRole("button", { name: "＋ 地点、时间、评分、标签", exact: true })
@@ -127,6 +131,7 @@ const fs = require("node:fs/promises");
     await page.setViewportSize({ width: 393, height: 490 });
     await page.screenshot({
       path: `out/editor-keyboard.png`.replace("out/", out + "/"),
+      animations: "disabled",
     });
     assert.ok(
       await page

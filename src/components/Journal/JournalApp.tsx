@@ -96,6 +96,17 @@ export default function JournalApp({
     [revision, setRevision] = useState(0),
     [undo, setUndo] = useState<JournalEntry | null>(null),
     [bytes, setBytes] = useState<number | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(
+      () => {
+        setNotice("");
+        setUndo(null);
+      },
+      undo ? 10000 : 4000,
+    );
+    return () => clearTimeout(timer);
+  }, [notice, undo]);
   const scroll = useRef<HTMLDivElement>(null),
     busyRef = useRef(false),
     didCreate = useRef(false);
@@ -109,7 +120,6 @@ export default function JournalApp({
   }, []);
   useEffect(() => {
     document.documentElement.classList.add("journal-open");
-    void boot().catch((e) => setError(e.message));
     return () => document.documentElement.classList.remove("journal-open");
   }, [boot]);
   useEffect(() => {

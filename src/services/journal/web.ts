@@ -165,6 +165,14 @@ export async function journalWeb(o: any): Promise<any> {
             book_id: "daily",
             version: e.version + 1,
           });
+      for (const d of await request(table("drafts").getAll())) {
+        if (d.entry.book_id !== o.id) continue;
+        d.entry.book_id = "daily";
+        const current = await request(table("entries").get(d.entry.id));
+        if (current && d.base_version === current.version - 1)
+          d.base_version = current.version;
+        table("drafts").put(d);
+      }
       table("books").delete(o.id);
     } else if (o.action === "stats") {
       const images = await request(table("images").getAll());
