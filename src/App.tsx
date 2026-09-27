@@ -210,6 +210,7 @@ export const App: React.FC = () => {
   const [loaded, setLoaded] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
   const savingVersion = useRef(0);
+  const writesInFlight = useRef(0);
   const failedSaveRef = useRef<{ before: TaskNode[]; next: TaskNode[]; description: string; recordUndo: boolean } | null>(null);
   const pendingNavigationGuard = useRef<null | (() => Promise<boolean>)>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -409,6 +410,7 @@ export const App: React.FC = () => {
     async (newTasks: TaskNode[], actionDesc: string, recordUndo = true, confirmedOnly = false): Promise<boolean> => {
       if (getPersistenceError()) { setStorageError(getPersistenceError()); return false; }
       const previous = tasksRef.current;
+      writesInFlight.current++;
       const version = ++savingVersion.current;
       if (!confirmedOnly) { tasksRef.current = newTasks; setTasks(newTasks); }
       setSaveStatus('saving');
@@ -427,7 +429,7 @@ export const App: React.FC = () => {
         if (version === savingVersion.current) setSaveStatus('error');
         setStorageError((error as Error).message);
         return false;
-      }
+      } finally { writesInFlight.current--; }
     }, []
   );
 
@@ -452,7 +454,7 @@ export const App: React.FC = () => {
   // Undo / Redo handlers
   const handleUndo = useCallback(() => {
     const currentTasks = tasksRef.current;
-    if (saveStatus === 'saving' || storageError || batchBusy) return;
+    if (writesInFlight.current > 0 || getPersistenceError() || saveStatus === 'saving' || storageError || batchBusy) return;
     let res;
     try { res = undoManager.undo(currentTasks); }
     catch (error) { setToast({ id: 'undo-conflict', type: 'error', title: (error as Error).message }); return; }
@@ -470,7 +472,7 @@ export const App: React.FC = () => {
 
   const handleRedo = useCallback(() => {
     const currentTasks = tasksRef.current;
-    if (saveStatus === 'saving' || storageError || batchBusy) return;
+    if (writesInFlight.current > 0 || getPersistenceError() || saveStatus === 'saving' || storageError || batchBusy) return;
     let res;
     try { res = undoManager.redo(currentTasks); }
     catch (error) { setToast({ id: 'redo-conflict', type: 'error', title: (error as Error).message }); return; }
@@ -1001,7 +1003,7 @@ export const App: React.FC = () => {
   // One structure-only transaction shared by mobile drag, move picker and desktop.
   const moveBusyRef = useRef(false);
   const handleTaskMove = async (move: TaskMove): Promise<boolean> => {
-    if (moveBusyRef.current || batchBusy || saveStatus === 'saving' || !loaded || !isTabOwner || storageError) return false;
+    if (writesInFlight.current > 0 || moveBusyRef.current || batchBusy || saveStatus === 'saving' || !loaded || !isTabOwner || storageError) return false;
     moveBusyRef.current = true;
     setBatchBusy(true);
     try {

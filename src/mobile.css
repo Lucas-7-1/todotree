@@ -1009,3 +1009,8 @@ html.m-dragging .m-composer { visibility: hidden; }
 html.m-dragging .m-task button { pointer-events: none; }
 .m-task .m-project-progress { display: inline-flex; align-items: center; gap: 4px; }
 .m-confirm-remaining { font-size: 12px; min-height: 36px; color: #138e6b; margin-left: 48px; text-align: left; }
+.m-tree-window { overflow-anchor: none; }
+.m-tree-node.just-moved { animation: m-move-settle 160ms ease-out; background: #f0f7ff; }
+@keyframes m-move-settle { from { transform: translateY(4px); } to { transform: translateY(0); } }
+html[data-reduced-motion="true"] .m-tree-node.just-moved { animation: none; }
+@media (prefers-reduced-motion: reduce) { .m-tree-node.just-moved { animation: none; } }

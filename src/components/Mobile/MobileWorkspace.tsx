@@ -28,6 +28,7 @@ import { CompletionCalendar } from "../TodayView/CompletionCalendar";
 import { MobileComposer, Draft } from "./MobileComposer";
 import { MobileTaskRow } from "./MobileTaskRow";
 import { TaskMove, visibleMobileTree, validateTaskMove } from '../../services/taskMove';
+import { MobileTreeWindow } from './MobileTreeWindow';
 import { useTreeDrag } from './useTreeDrag';
 import { useToday } from "./useMobile";
 interface Props {
@@ -58,6 +59,8 @@ export function MobileWorkspace(p: Props) {
   const [inlineParent, setInlineParent] = useState<string | null>(null);
   const [inlineTitle, setInlineTitle] = useState('');
   const [moveQuery, setMoveQuery] = useState('');
+  const [movedId, setMovedId] = useState<string | null>(null);
+  useEffect(() => { if (!movedId) return; const timer = setTimeout(() => setMovedId(null), 700); return () => clearTimeout(timer); }, [movedId]);
   const [restoreView, setRestoreView] = useState<{ query: string; quadrant: QuadrantType | 'all'; sort: 'default' | 'priority' } | null>(null);
   useEffect(() => { try { localStorage.setItem('todotree.mobile.expanded.v1', JSON.stringify([...expanded])); } catch { /* Preference failure must not block task writes. */ } }, [expanded]);
   const draftCache = useRef<Record<string, Draft>>({});
@@ -153,7 +156,7 @@ export function MobileWorkspace(p: Props) {
       const ok = await p.onMove(move);
       if (!ok) setNotice('移动未保存，原位置已保留');
       if (ok) {
-        setSheet('none'); setNotice('位置已保存，可在页面更多中撤销');
+        setSheet('none'); setMovedId(move.taskId);
         if (move.parentId) setExpanded(old => new Set([...old, move.parentId!]));
       }
       return ok;
@@ -765,9 +768,9 @@ export function MobileWorkspace(p: Props) {
                 }}>返回原筛选视图</button>}
                 {treeUnfiltered ? <>
                   {parent && <p className="m-tree-hint">点子任务展开 · 长按标题拖动</p>}
-                  {treeRows.slice(0, visibleCount).map(({ task, depth }) => <React.Fragment key={task.id}>
+                  <MobileTreeWindow rows={treeRows.slice(0, visibleCount)} scrollRef={scrollRef} renderRow={({ task, depth }) => <React.Fragment key={task.id}>
                     <div data-tree-row={task.id} style={{ '--tree-depth': depth } as React.CSSProperties}
-                      className={`m-tree-node ${drag.sourceId === task.id ? 'is-drag-source' : ''} ${drag.preview?.taskId === task.id ? `drop-${drag.preview.kind} ${drag.preview.error ? 'drop-invalid' : drag.preview.move ? 'drop-ready' : 'drop-wait'}` : ''}`}>
+                      className={`m-tree-node ${movedId === task.id ? 'just-moved' : ''} ${drag.sourceId === task.id ? 'is-drag-source' : ''} ${drag.preview?.taskId === task.id ? `drop-${drag.preview.kind} ${drag.preview.error ? 'drop-invalid' : drag.preview.move ? 'drop-ready' : 'drop-wait'}` : ''}`}>
                       {row(task, false, true)}
                       {task.status === 'open' && !!index.children.get(task.id)?.length && index.children.get(task.id)!.every(t => t.status === 'done') &&
                         <button className="m-confirm-remaining" disabled={block || !!drag.sourceId} onClick={() => complete(task)}>剩余子项已完成 · 确认完成</button>}
@@ -778,7 +781,7 @@ export function MobileWorkspace(p: Props) {
                       <button type="submit" disabled={block || !inlineTitle.trim()}>添加</button>
                       <button type="button" disabled={block} onClick={() => { setInlineParent(null); setInlineTitle(''); }}>取消</button>
                     </form>}
-                  </React.Fragment>)}
+                  </React.Fragment>} />
                   {treeRows.length > visibleCount && <button className="m-text-button" onClick={() => setVisibleCount(n => n + 50)}>继续显示（还有 {treeRows.length - visibleCount} 项）</button>}
                 </> : renderRows(sorted(filtered(projectRows)))}
                 {!filtered(projectRows).length &&

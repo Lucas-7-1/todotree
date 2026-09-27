@@ -645,6 +645,8 @@ test('mobile long hold directly reparents via dwell; ordinary scrolling and back
     assert.ok(document.querySelector('.drop-inside.drop-ready'));
     await act(()=>document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true})));
     assert.equal(get(mobileLatest,'a').parent_id,'b');assert.equal(get(mobileLatest,'leaf').parent_id,'a');assert.equal(get(mobileLatest,'root').status,'open');
+    await click(document.querySelector('[aria-label="返回上一级"]'));
+    assert.ok(document.querySelector('[data-task-id="root"]'), 'back must work immediately after a drop');
   } finally {document.elementFromPoint=oldHit;}
 });
 test('mobile rejected move retains source and reports failed save',async()=>{

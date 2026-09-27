@@ -152,7 +152,7 @@ export function useTreeDrag(options: Options) {
     const mouseDown = (e: MouseEvent) => { if (e.button === 0) start(e.target, e.clientX, e.clientY); };
     const mouseMove = (e: MouseEvent) => { if (candidate) move(e.clientX, e.clientY, e); };
     const mouseUp = () => finish(true);
-    const click = (e: Event) => { if (active || Date.now() < suppressClickUntil.current) { e.preventDefault(); e.stopPropagation(); } };
+    const click = (e: Event) => { if (active || (Date.now() < suppressClickUntil.current && (e.target as Element)?.closest('[data-drag-title]'))) { e.preventDefault(); e.stopPropagation(); } };
     const back = (e: Event) => { if (active) { e.preventDefault(); e.stopImmediatePropagation(); finish(false); } };
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') back(e); };
     const context = (e: Event) => { if (candidate || (e.target as Element).closest('[data-drag-title]')) e.preventDefault(); };

@@ -17,6 +17,7 @@ const assert = require("node:assert/strict");
   const context = await browser.newContext({
     viewport: { width: 393, height: 852 },
     isMobile: true,
+    hasTouch: true,
     deviceScaleFactor: 2,
     timezoneId: "Asia/Shanghai",
     recordVideo: { dir: out, size: { width: 393, height: 852 } },
@@ -141,6 +142,43 @@ const assert = require("node:assert/strict");
     await assertFits();
     await page.waitForTimeout(350);
     await page.screenshot({ path: `${out}/project-retained-branch.png` });
+    const cdp = await context.newCDPSession(page);
+    const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+    const dragTo = async (id, target, inside = true, ancestor = false) => {
+      const from = await page.locator(`[data-drag-title="${id}"]`).boundingBox();
+      const sx = from.x + from.width / 2, sy = from.y + from.height / 2;
+      await touch('touchStart', sx, sy);
+      await page.locator('.m-drag-float').waitFor();
+      const to = await page.locator(target).boundingBox();
+      const tx = to.x + to.width / 2, ty = ancestor || inside ? to.y + to.height / 2 : to.y + 3;
+      for (let i = 1; i <= 12; i++) {
+        await touch('touchMove', sx + (tx - sx) * i / 12, sy + (ty - sy) * i / 12);
+        await page.waitForTimeout(20);
+      }
+      if (inside && !ancestor) await page.locator('.drop-inside.drop-ready').waitFor();
+      else await page.waitForTimeout(100);
+      await page.screenshot({ path: `${out}/drag-${ancestor ? 'out' : inside ? 'inside' : 'sort'}-preview.png` });
+      await touch('touchEnd', tx, ty);
+      await page.locator('.m-drag-float').waitFor({ state: 'hidden' });
+      await page.locator('.m-saving').waitFor({ state: 'hidden' });
+      await page.waitForTimeout(100);
+    };
+    const storedTasks = () => page.evaluate(async () => (await (await import('/src/services/durableStore.ts')).loadWorkspace()).data.tasks);
+    await dragTo('p2', '[data-tree-row="p3"]');
+    assert.equal((await storedTasks()).find(t => t.id === 'p2').parent_id, 'p3');
+    assert.equal((await storedTasks()).find(t => t.id === 'p1').status, 'open');
+    await page.screenshot({ path: `${out}/tree-inline-expanded.png` });
+    await dragTo('p2', '[data-drop-parent="p1"]', false, true);
+    assert.equal((await storedTasks()).find(t => t.id === 'p2').parent_id, 'p1');
+    await dragTo('p2', '[data-tree-row="p3"]', false);
+    const ordered = (await storedTasks()).filter(t => t.parent_id === 'p1').sort((a,b) => a.sort_order-b.sort_order);
+    assert.equal(ordered[0].id, 'p2');
+    for (const width of [320, 360, 393, 430]) {
+      await page.setViewportSize({ width, height: 852 }); await assertFits();
+      await page.screenshot({ path: `${out}/tree-${width}.png` });
+    }
+    await page.setViewportSize({ width: 393, height: 852 });
+
     await page.getByRole("button", { name: "返回上一级", exact: true }).click();
     await page
       .getByRole("button", { name: "更多操作 下周整理电脑文件", exact: true })
@@ -213,14 +251,46 @@ const assert = require("node:assert/strict");
     await page
       .locator(".m-task-title", { hasText: "只写标题的今日事项" })
       .waitFor();
+    await page.evaluate(async () => {
+      const store = await import('/src/services/durableStore.ts');
+      await store.commitWorkspace(data => {
+        const base = data.tasks[0];
+        const tasks = Array.from({ length: 501 }, (_, i) => ({ ...base, id: `bench-${i}`, title: i === 0 ? '大型项目' : `任务 ${i}`, parent_id: i ? 'bench-0' : null,
+          root_bucket: i ? null : 'categories', status: 'open', completed_at: null, archived_at: null, deleted_at: null, planned_date: null,
+          due_type: 'none', due_date: null, quadrant: null, sort_order: i * 1024 }));
+        return { ...data, tasks };
+      });
+      localStorage.removeItem('todotree.mobile.expanded.v1');
+      // New isolated browser fixture: discard the old document's desktop tab lease.
+      // Native Android uses a single activity and does not acquire this browser-only lock.
+      localStorage.removeItem('todotree_active_tab_id');
+    });
+    await page.reload();
+    await page.getByRole('button', { name: '项目', exact: true }).click();
+    await page.locator('[data-drag-title="bench-0"]').click();
+    for (let i = 0; i < 22; i++) {
+      await page.locator('.m-scroll').evaluate(el => { el.scrollTop = el.scrollHeight; });
+      await page.waitForTimeout(60);
+    }
+    await page.locator('[data-tree-row="bench-500"]').waitFor();
+    const renderedRows = await page.locator('[data-tree-row]').count();
+    assert.ok(renderedRows < 40, `500-task project mounted ${renderedRows} rows`);
+    await page.locator('[data-drag-title="bench-500"]').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: `${out}/large-tree-before-drag.png` });
+    await dragTo('bench-500', '[data-tree-row="bench-499"]');
+    assert.equal((await storedTasks()).find(t => t.id === 'bench-500').parent_id, 'bench-499');
+    await page.screenshot({ path: `${out}/large-tree-window.png` });
     assert.equal(errors.length, 0, errors.join("\n"));
     await fs.writeFile(
       `${out}/browser-result.json`,
       JSON.stringify(
         {
           passed: true,
+          largeTree: { nodes: 501, renderedRows, canDragPastFirst50: true },
           viewports: [360, 393, 430],
           tested: [
+            "native-touch-drag-inside", "native-touch-drag-out", "drag-sibling-sort", "tree-overflow-320-430",
             "multi-confirm",
             "retained-branch",
             "first-child",
