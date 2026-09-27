@@ -626,7 +626,7 @@ export default function JournalApp({
             </span>
           </button>
         )}
-        <div className="j-section-title">
+        {(mode !== 'tree' || activeSearch || trash) && <div className="j-section-title">
           <h2>
             {trash
               ? "回收站"
@@ -647,7 +647,7 @@ export default function JournalApp({
               ＋ {selected === today ? "记一笔" : "补记"}
             </button>
           )}
-        </div>
+        </div>}
         {mode==='tree' && !activeSearch && !trash ? (detail ? null : <JournalTree root={null} book={book} books={books} revision={revision} onOpen={e=>void openDetail(e).catch(err=>setError(err.message))} onEditDraft={setEditing} onChange={changed} guard={treeGuard}/>) : loading ? (
           <div className="j-empty">正在翻开手帐…</div>
         ) : entries.length === 0 ? (
