@@ -926,6 +926,36 @@ public final class JournalStore extends SQLiteOpenHelper {
           ) throw new IOException("备份附件引用缺失");
         }
       }
+      // Repair referenced originals from the fully verified archive before making
+      // the recovery checkpoint. Otherwise a missing original would itself block
+      // the backup restore intended to recover that original.
+      synchronized (this) {
+        for (int i = 0; i < media.length(); i++) {
+          String id = media.getJSONObject(i).getString("id");
+          File destination = new File(originals, id);
+          if (
+            get(getReadableDatabase(), "attachments", id) == null ||
+            (destination.isFile() && sha(destination).equals(id))
+          ) continue;
+          File repair = new File(staging, id + ".repair");
+          try {
+            try (
+              InputStream in = new FileInputStream(new File(folder, id));
+              FileOutputStream out = new FileOutputStream(repair)
+            ) {
+              copy(in, out, IMAGE_LIMIT);
+              out.getFD().sync();
+            }
+            if (!repair.renameTo(destination)) throw new IOException(
+              "原图修复失败，原记录已保留"
+            );
+            new File(previews, id + ".jpg").delete();
+            new File(previews, id + "-thumb.jpg").delete();
+          } finally {
+            repair.delete();
+          }
+        }
+      }
       File checkpoint = new File(root, "before-import.zip"),
         temp = new File(root, "before-import.zip.part");
       try (FileOutputStream out = new FileOutputStream(temp)) {

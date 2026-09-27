@@ -193,7 +193,18 @@ public class JournalStoreTest {
       restored.command(op("list")).getJSONArray("entries").length()
     );
     assertTrue(new File(restored.originals, id).isFile());
+    assertTrue(new File(restored.originals, id).delete());
     restored.importZip(new ByteArrayInputStream(archive));
+    assertEquals(id, JournalStore.sha(new File(restored.originals, id)));
+    try (
+      FileOutputStream damaged = new FileOutputStream(
+        new File(restored.originals, id)
+      )
+    ) {
+      damaged.write(new byte[] { 1, 2, 3 });
+    }
+    restored.importZip(new ByteArrayInputStream(archive));
+    assertEquals(id, JournalStore.sha(new File(restored.originals, id)));
     assertEquals(
       1,
       restored.command(op("list")).getJSONArray("entries").length()
