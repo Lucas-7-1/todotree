@@ -116,7 +116,7 @@ export const QuickInputBar: React.FC<QuickInputBarProps> = ({
   };
 
   return (
-    <div className="px-6 pt-2 pb-6 flex-shrink-0 bg-gradient-to-t from-white via-white to-transparent">
+    <div className="quick-input-bar px-6 pt-2 pb-6 flex-shrink-0 bg-gradient-to-t from-white via-white to-transparent">
       {/* Selected Parent Indicator (if adding child directly) */}
       {parentTitle && (
         <div className="mb-2 flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-3 py-1 rounded-lg w-fit">
@@ -130,8 +130,8 @@ export const QuickInputBar: React.FC<QuickInputBarProps> = ({
       )}
 
       {/* Main Input Box (PRD UI09: 44-48px uniform height) */}
-      <div className="bg-white border border-slate-200/90 rounded-2xl shadow-sm shadow-slate-100 h-[46px] px-3 flex items-center transition-all focus-within:border-blue-500 focus-within:shadow-md focus-within:shadow-blue-500/5">
-        <div className="flex items-center gap-2 flex-1">
+      <div className="quick-input-box bg-white border border-slate-200/90 rounded-2xl shadow-sm shadow-slate-100 h-[46px] px-3 flex items-center transition-all focus-within:border-blue-500 focus-within:shadow-md focus-within:shadow-blue-500/5">
+        <div className="quick-input-fields flex items-center gap-2 flex-1">
           <div className="w-6 h-6 rounded-full border border-dashed border-slate-300 flex items-center justify-center text-slate-400 flex-shrink-0">
             <Plus className="w-3.5 h-3.5" />
           </div>
@@ -147,6 +147,7 @@ export const QuickInputBar: React.FC<QuickInputBarProps> = ({
             className="flex-1 bg-transparent text-sm text-slate-800 placeholder-slate-400 outline-none"
           />
 
+          <button type="button" onClick={handleCreate} disabled={!title.trim()} className="mobile-add-task bg-blue-600 text-white rounded-lg px-3 disabled:opacity-40">添加</button>
           {/* Date Picker Button & Dropdown */}
           <div className="relative" ref={datePickerRef}>
             <button

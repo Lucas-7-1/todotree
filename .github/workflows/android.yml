@@ -1,0 +1,80 @@
+name: Android APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [gpt-6-android-v1]
+    paths-ignore: ['docs/**', '**.md']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+          log-accepted-android-sdk-licenses: 'false'
+      - run: npm ci
+      - run: npm test
+      - name: Browser journal interaction regression
+        run: |
+          npm install --no-save playwright@1.51.1
+          npx playwright install --with-deps chromium
+          node tests/journal-browser-smoke.cjs
+          node tests/journal-tree-browser.cjs
+        env:
+          MOBILE_QA_DIR: /tmp/journal-browser-qa
+      - name: Preserve browser review screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TodoTree-Journal-browser-${{ github.run_number }}
+          path: /tmp/journal-browser-qa/**
+          if-no-files-found: ignore
+      - run: npm run android:sync
+      - run: chmod +x android/gradlew && cd android && ./gradlew assembleDebug assembleRelease --no-daemon
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Android storage integration test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: bash -c 'cd android; ./gradlew :app:connectedDebugAndroidTest --no-daemon; test_status=$?; mkdir -p app/build/outputs/mobile-ui; adb pull /sdcard/Download/todotree-ui app/build/outputs/mobile-ui || exit 1; test -s app/build/outputs/mobile-ui/todotree-ui/today-populated.png || exit 1; exit "$test_status"'
+      - name: Verify native screenshots were exported
+        run: |
+          test -s android/app/build/outputs/mobile-ui/todotree-ui/today-populated.png
+          test -s android/app/build/outputs/mobile-ui/todotree-ui/calendar.png
+          test -s android/app/build/outputs/mobile-ui/todotree-ui/keyboard.png
+      - name: Preserve Android test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TodoTree-Android-tests-${{ github.run_number }}
+          path: |
+            android/app/build/reports/androidTests/connected/**
+            android/app/build/outputs/mobile-ui/**
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TodoTree-Android-debug-${{ github.run_number }}
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
+          retention-days: 14

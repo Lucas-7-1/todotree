@@ -42,9 +42,9 @@ export const Header: React.FC<HeaderProps> = ({
   const dateSubtitle = `${month}月${day}日 · ${weekday}`;
 
   return (
-    <header className="min-h-[64px] max-h-[72px] px-6 py-2 flex items-center justify-between border-b border-slate-100 bg-white">
-      <div>
-        <div className="flex items-center gap-3">
+    <header className="workspace-header min-h-[64px] max-h-[72px] px-6 py-2 flex items-center justify-between border-b border-slate-100 bg-white">
+      <div className="header-heading">
+        <div className="header-title-line flex items-center gap-3">
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{title}</h1>
           
           {/* Save Status Badge */}
@@ -83,7 +83,7 @@ export const Header: React.FC<HeaderProps> = ({
         <p className="text-xs text-slate-400 mt-1 font-medium">{dateSubtitle}</p>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="header-actions flex items-center gap-3">
         {/* Search (PRD Section 3.1: Remove duplicate search icon in toolbar) */}
         {showSearch && (
           showSearchInput ? (
@@ -116,8 +116,9 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           type="button"
           onClick={onUndo}
+          aria-label="撤销最近操作"
           disabled={!canUndo}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="header-undo flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           title={canUndo ? `撤销: ${undoDescription || '最近操作'} (Ctrl+Z)` : '无可撤销操作 (Ctrl+Z)'}
         >
           <Undo2 className="w-3.5 h-3.5 text-slate-600" />
@@ -127,7 +128,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Templates button */}
         <button
           onClick={onOpenTemplateModal}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+          className="desktop-template-button flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
         >
           <Sparkles className="w-3.5 h-3.5 text-blue-600" />
           <span>快捷模板</span>

@@ -266,20 +266,17 @@ export function formatRelativeDate(task: TaskNode): { label: string; isOverdue: 
 }
 
 /**
- * Check if a completed task has an active (open) task ancestor.
- * If the first open ancestor is a category container (root_bucket === 'categories')
- * or there is no open ancestor, returns false (the task belongs to an archived/completed branch).
- * If the first open ancestor is an actual task, returns true (the branch is still active).
+ * Root categories and nested parents follow the same retention rule.
+ * An explicitly archived ancestor ends the active branch.
  */
 export function hasActiveTaskAncestor(tasks: TaskNode[], task: TaskNode): boolean {
   let currParentId = task.parent_id;
-  while (currParentId) {
+  const visited = new Set<string>([task.id]);
+  while (currParentId && !visited.has(currParentId)) {
+    visited.add(currParentId);
     const parentNode = tasks.find((t) => t.id === currParentId);
-    if (!parentNode || parentNode.deleted_at) break;
+    if (!parentNode || parentNode.deleted_at || parentNode.archived_at) break;
     if (parentNode.status === 'open') {
-      if (parentNode.root_bucket === 'categories') {
-        return false;
-      }
       return true;
     }
     currParentId = parentNode.parent_id;
@@ -294,8 +291,10 @@ export const hasOpenAncestor = hasActiveTaskAncestor;
 
 /**
  * Determine if a task should be visible in the active workspace.
- * Open tasks are always visible.
- * Completed tasks remain visible if they belong to an active, incomplete task branch (i.e. hasActiveTaskAncestor).
+ * PRD V1.0 rules:
+ * - Active workspace shows all non-deleted, non-archived tasks.
+ * - Completed tasks remain struck through in the workspace until archived.
+ * - Nodes with archived or deleted ancestors are excluded from the active workspace.
  */
 export function isTaskVisibleInWorkspace(
   tasks: TaskNode[],
@@ -303,8 +302,17 @@ export function isTaskVisibleInWorkspace(
   showCompleted: boolean = false
 ): boolean {
   if (task.deleted_at) return false;
-  if (showCompleted) return true;
-  if (task.status === 'open') return true;
-  return hasActiveTaskAncestor(tasks, task);
-}
+  if (task.archived_at) return false;
 
+  let currParentId = task.parent_id;
+  const visited = new Set<string>([task.id]);
+  while (currParentId && !visited.has(currParentId)) {
+    visited.add(currParentId);
+    const parentNode = tasks.find((t) => t.id === currParentId);
+    if (!parentNode || parentNode.deleted_at || parentNode.archived_at) {
+      return false;
+    }
+    currParentId = parentNode.parent_id;
+  }
+  return true;
+}

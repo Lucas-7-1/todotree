@@ -1,3 +1,5 @@
+import { isAndroid } from '../native/platform';
+import { loadWorkspace, commitWorkspace } from '../durableStore';
 import {
   AISettings,
   FactsPackage,
@@ -119,43 +121,8 @@ export function computeInputHash(
 // --- Persistence Helpers ---
 
 export async function loadAISettings(): Promise<AISettings> {
-  if (cachedSettings) return cachedSettings;
-
-  try {
-    const resp = await fetch('/api/ai/settings');
-    if (resp.ok) {
-      const data = await resp.json();
-      if (data && typeof data === 'object') {
-        // Ensure template content_hash is computed if missing
-        if (data.prompt_templates && Array.isArray(data.prompt_templates)) {
-          data.prompt_templates = data.prompt_templates.map((t: any) => ({
-            ...t,
-            content_hash: t.content_hash || computeContentHash(t.content),
-          }));
-        }
-        cachedSettings = { ...DEFAULT_AI_SETTINGS, ...data };
-        return cachedSettings!;
-      }
-    }
-  } catch {}
-
-  try {
-    const local = localStorage.getItem(SETTINGS_KEY);
-    if (local) {
-      const parsed = JSON.parse(local);
-      if (parsed.prompt_templates && Array.isArray(parsed.prompt_templates)) {
-        parsed.prompt_templates = parsed.prompt_templates.map((t: any) => ({
-          ...t,
-          content_hash: t.content_hash || computeContentHash(t.content),
-        }));
-      }
-      cachedSettings = { ...DEFAULT_AI_SETTINGS, ...parsed };
-      return cachedSettings!;
-    }
-  } catch {}
-
-  cachedSettings = { ...DEFAULT_AI_SETTINGS };
-  return cachedSettings!;
+  const stored = (await loadWorkspace()).data.ai_settings;
+  return { ...DEFAULT_AI_SETTINGS, ...stored };
 }
 
 export async function saveAISettings(settings: AISettings): Promise<void> {
@@ -167,107 +134,30 @@ export async function saveAISettings(settings: AISettings): Promise<void> {
     }));
   }
 
+  await commitWorkspace(data => ({ ...data, ai_settings: settings }));
   cachedSettings = settings;
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  } catch {}
 
-  try {
-    fetch('/api/ai/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(settings),
-    }).catch(() => {});
-  } catch {}
 }
 
 export async function loadSavedReports(): Promise<SavedReport[]> {
-  if (cachedReports) return cachedReports;
-
-  try {
-    const resp = await fetch('/api/ai/reports');
-    if (resp.ok) {
-      const data = await resp.json();
-      if (Array.isArray(data)) {
-        cachedReports = data;
-        return data;
-      }
-    }
-  } catch {}
-
-  try {
-    const local = localStorage.getItem(REPORTS_KEY);
-    if (local) {
-      const parsed = JSON.parse(local);
-      if (Array.isArray(parsed)) {
-        cachedReports = parsed;
-        return parsed;
-      }
-    }
-  } catch {}
-
-  cachedReports = [];
-  return [];
+  return (await loadWorkspace()).data.reports;
 }
 
 export async function saveSavedReports(reports: SavedReport[]): Promise<void> {
+  await commitWorkspace(data => ({ ...data, reports: reports }));
   cachedReports = reports;
-  try {
-    localStorage.setItem(REPORTS_KEY, JSON.stringify(reports));
-  } catch {}
-
-  try {
-    fetch('/api/ai/reports', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(reports),
-    }).catch(() => {});
-  } catch {}
 }
 
+
 export async function loadAIAttempts(): Promise<AIAttempt[]> {
-  if (cachedAttempts) return cachedAttempts;
-
-  try {
-    const resp = await fetch('/api/ai/attempts');
-    if (resp.ok) {
-      const data = await resp.json();
-      if (Array.isArray(data)) {
-        cachedAttempts = data;
-        return data;
-      }
-    }
-  } catch {}
-
-  try {
-    const local = localStorage.getItem(ATTEMPTS_KEY);
-    if (local) {
-      const parsed = JSON.parse(local);
-      if (Array.isArray(parsed)) {
-        cachedAttempts = parsed;
-        return parsed;
-      }
-    }
-  } catch {}
-
-  cachedAttempts = [];
-  return [];
+  return (await loadWorkspace()).data.attempts;
 }
 
 export async function saveAIAttempts(attempts: AIAttempt[]): Promise<void> {
+  await commitWorkspace(data => ({ ...data, attempts: attempts }));
   cachedAttempts = attempts;
-  try {
-    localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(attempts));
-  } catch {}
-
-  try {
-    fetch('/api/ai/attempts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(attempts),
-    }).catch(() => {});
-  } catch {}
 }
+
 
 // --- Rolling 24-Hour Budget & Cooldown (PRD 9.1 & 9.2) ---
 
@@ -518,6 +408,7 @@ export async function requestReport(
   } = {}
 ): Promise<GenerateReportResult> {
   const source = options.source || 'manual';
+  if (isAndroid() && source === 'scheduled') throw new Error('手机版首版仅支持手动复盘');
   const reportKey = computeReportKey(facts);
 
   // 1. Template resolution

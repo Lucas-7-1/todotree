@@ -63,6 +63,13 @@
 
 ---
 
+## 嵌套任务与闭环更新
+
+- 已完成子任务可划线保留，通过「搞定」单独归档；全部子任务完成时父分支自动归档。
+- 嵌套新增支持最多 5 层，在已完成节点下新增时自动重新开启父链。
+- 执行 `npm test` 运行真实业务模块与 React 交互回归测试。
+- [行为、验证与 Windows 重新打包说明](docs/nested-task-closure.md)。现有 EXE 需重新编译后才包含本次修改。
+
 ## 🚀 快速启动与使用
 
 ### 方式一：Windows 原生桌面免安装版 (推荐)
@@ -93,7 +100,7 @@ node bundle-singlefile.mjs
 ### 方式四：编译桌面宿主 EXE (Windows)
 使用 Windows 自带的 .NET Framework C# 编译器编译宿主程序：
 ```powershell
-& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /out:TodoTree.exe /resource:dist\TodoTree_一键直达.html desktop-host\Program.cs
+& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /r:System.Web.Extensions.dll /out:TodoTree.exe /resource:dist\TodoTree_一键直达.html desktop-host\Program.cs desktop-host\DurableWorkspace.cs
 ```
 
 ---
@@ -190,3 +197,7 @@ node tests/run_v1_3_tests.mjs
 ## 📄 授权与许可
 
 本项目采用 [MIT 许可证](LICENSE) 开源。
+
+## Persistence and multi-select update
+
+See [migration, recovery, batch operations and Windows validation](docs/persistence-and-bulk-operations.md). The new host requires `System.Web.Extensions.dll` and `desktop-host/DurableWorkspace.cs` when compiling. The previously tracked EXE and dist files are not this source revision; rebuild before distributing.

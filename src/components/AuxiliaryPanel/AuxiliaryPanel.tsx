@@ -59,7 +59,7 @@ export const AuxiliaryPanel: React.FC<AuxiliaryPanelProps> = ({
       {/* Main Drawer Container */}
       <aside
         ref={panelRef}
-        className={`fixed top-0 right-0 bottom-0 ${widthClass} max-w-full bg-white border-l border-slate-200/90 shadow-2xl z-40 flex flex-col select-none animate-in slide-in-from-right duration-200`}
+        className={`mobile-full-panel fixed top-0 right-0 bottom-0 ${widthClass} max-w-full bg-white border-l border-slate-200/90 shadow-2xl z-40 flex flex-col select-none animate-in slide-in-from-right duration-200`}
         role="dialog"
         aria-label={title}
       >

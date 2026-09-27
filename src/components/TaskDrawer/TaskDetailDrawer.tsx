@@ -202,7 +202,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   const candidateParents = allTasks.filter(t => !t.deleted_at && t.id !== task.id);
 
   return (
-    <div className="fixed inset-y-0 right-0 w-[420px] bg-white shadow-2xl border-l border-slate-200 z-50 flex flex-col justify-between select-none animate-in slide-in-from-right duration-200">
+    <div className="mobile-full-panel fixed inset-y-0 right-0 w-[420px] bg-white shadow-2xl border-l border-slate-200 z-50 flex flex-col justify-between select-none animate-in slide-in-from-right duration-200">
       {/* Top Header */}
       <div>
         <div className="p-4 border-b border-slate-100 flex items-center justify-between">

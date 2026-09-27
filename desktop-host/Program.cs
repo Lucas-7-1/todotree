@@ -11,8 +11,8 @@ using System.Reflection;
 [assembly: AssemblyDescription("TodoTree - 个人树状任务管理工具")]
 [assembly: AssemblyProduct("TodoTree")]
 [assembly: AssemblyCopyright("Copyright © 2026")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace TodoTreeHost
 {
@@ -21,6 +21,7 @@ namespace TodoTreeHost
         private static HttpListener _listener;
         private static bool _isRunning = true;
         private static string _dataDir;
+        private static DurableWorkspace _workspace;
         private static string _tasksFilePath;
         private static string _settingsFilePath;
         private static string _eventsFilePath;
@@ -53,6 +54,7 @@ namespace TodoTreeHost
                     return;
                 }
 
+                _workspace = new DurableWorkspace(_dataDir, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
                 int port = GetAvailablePort();
                 string serverUrl = string.Format("http://127.0.0.1:{0}/", port);
 
@@ -187,39 +189,9 @@ namespace TodoTreeHost
 
         private static void InitDataDirectory()
         {
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            string preferredDir = Path.Combine(baseDir, "data");
+            string legacyDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data");
+            _dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TodoTree", "data");
 
-            bool canWriteBase = false;
-            try
-            {
-                if (!Directory.Exists(preferredDir))
-                {
-                    Directory.CreateDirectory(preferredDir);
-                }
-                string testFile = Path.Combine(preferredDir, ".write_test");
-                File.WriteAllText(testFile, "test");
-                File.Delete(testFile);
-                canWriteBase = true;
-            }
-            catch
-            {
-                canWriteBase = false;
-            }
-
-            if (canWriteBase)
-            {
-                _dataDir = preferredDir;
-            }
-            else
-            {
-                string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                _dataDir = Path.Combine(localApp, "TodoTree", "data");
-                if (!Directory.Exists(_dataDir))
-                {
-                    Directory.CreateDirectory(_dataDir);
-                }
-            }
 
             _tasksFilePath = Path.Combine(_dataDir, "tasks.json");
             _settingsFilePath = Path.Combine(_dataDir, "settings.json");
@@ -316,7 +288,8 @@ namespace TodoTreeHost
 
             try
             {
-                res.Headers["Access-Control-Allow-Origin"] = "*";
+                if (req.Headers["Origin"] != null && req.Headers["Origin"] != req.Url.GetLeftPart(UriPartial.Authority))
+                { res.StatusCode = 403; SafeClose(res); return; }
                 res.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
                 res.Headers["Access-Control-Allow-Headers"] = "Content-Type";
                 res.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
@@ -330,6 +303,12 @@ namespace TodoTreeHost
 
                 string path = req.Url.AbsolutePath.ToLowerInvariant();
 
+                if (req.HttpMethod == "POST" && (path == "/api/tasks" || path == "/api/events" || path == "/api/settings" || path.StartsWith("/api/ai/")))
+                {
+                    res.StatusCode = 409;
+                    SendJson(res, "{\"error\":\"请关闭旧版窗口，使用新版程序重新打开\"}");
+                    return;
+                }
                 if (path == "/" || path == "/index.html")
                 {
                     ServeHtml(res);
@@ -345,15 +324,38 @@ namespace TodoTreeHost
                 {
                     int uptime = (int)(DateTime.UtcNow - _startTime).TotalSeconds;
                     string healthJson = string.Format(
-                        "{{\"status\":\"ok\",\"instance_id\":\"{0}\",\"uptime_sec\":{1},\"db_ready\":true,\"timestamp\":\"{2}\"}}",
+                        "{{\"status\":\"ok\",\"instance_id\":\"{0}\",\"uptime_sec\":{1},\"db_ready\":{3},\"timestamp\":\"{2}\"}}",
                         _instanceId,
                         uptime,
-                        DateTime.UtcNow.ToString("o")
+                        DateTime.UtcNow.ToString("o"),
+                        _workspace.Ready ? "true" : "false"
                     );
                     byte[] payload = Encoding.UTF8.GetBytes(healthJson);
                     res.ContentType = "application/json; charset=utf-8";
                     res.OutputStream.Write(payload, 0, payload.Length);
                     SafeClose(res);
+                }
+                else if (path == "/api/workspace" || path == "/api/backup" || path == "/api/storage-info" || path == "/api/recover" || path == "/api/open-data-dir")
+                {
+                    try
+                    {
+                        string body = "";
+                        if (req.HttpMethod == "POST") using (var reader = new StreamReader(req.InputStream, Encoding.UTF8)) body = reader.ReadToEnd();
+                        string result;
+                        if (path == "/api/workspace" && req.HttpMethod == "GET") result = _workspace.Read();
+                        else if (path == "/api/workspace" && req.HttpMethod == "POST") result = _workspace.Commit(body);
+                        else if (path == "/api/storage-info" && req.HttpMethod == "GET") result = _workspace.Diagnostics();
+                        else if (path == "/api/backup" && req.HttpMethod == "POST") { _workspace.Checkpoint(); result = "{}"; }
+                        else if (path == "/api/recover" && req.HttpMethod == "POST") { _workspace.Recover(body); result = "{}"; }
+                        else if (path == "/api/open-data-dir" && req.HttpMethod == "POST") { Process.Start("explorer.exe", _dataDir); result = "{}"; }
+                        else { res.StatusCode = 405; SafeClose(res); return; }
+                        SendJson(res, result);
+                    }
+                    catch (Exception ex)
+                    {
+                        res.StatusCode = ex is InvalidOperationException ? 409 : 503;
+                        SendJson(res, new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new { error = ex.Message }));
+                    }
                 }
                 else if (path == "/api/tasks")
                 {
@@ -452,54 +454,25 @@ namespace TodoTreeHost
 
         private static void ServeHtml(HttpListenerResponse res)
         {
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            string[] possibleHtmlPaths = new string[]
-            {
-                Path.Combine(baseDir, "TodoTree_一键直达.html"),
-                Path.Combine(baseDir, "dist", "TodoTree_一键直达.html"),
-                Path.Combine(baseDir, "index.html"),
-                Path.Combine(baseDir, "dist", "index.html"),
-                Path.Combine(baseDir, "..", "TodoTree_一键直达.html")
-            };
-
-            foreach (string p in possibleHtmlPaths)
-            {
-                if (File.Exists(p))
-                {
-                    byte[] bytes = File.ReadAllBytes(p);
-                    res.ContentType = "text/html; charset=utf-8";
-                    res.OutputStream.Write(bytes, 0, bytes.Length);
-                    SafeClose(res);
-                    return;
-                }
-            }
-
+            string html = null;
             Assembly asm = Assembly.GetExecutingAssembly();
-            string[] names = asm.GetManifestResourceNames();
-            foreach (string name in names)
+            foreach (string name in asm.GetManifestResourceNames())
             {
                 if (name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
-                {
-                    using (Stream s = asm.GetManifestResourceStream(name))
-                    {
-                        if (s != null)
-                        {
-                            byte[] buffer = new byte[s.Length];
-                            s.Read(buffer, 0, buffer.Length);
-                            res.ContentType = "text/html; charset=utf-8";
-                            res.OutputStream.Write(buffer, 0, buffer.Length);
-                            SafeClose(res);
-                            return;
-                        }
-                    }
-                }
+                    using (var stream = asm.GetManifestResourceStream(name))
+                    using (var reader = new StreamReader(stream, Encoding.UTF8)) { html = reader.ReadToEnd(); break; }
             }
-
-            byte[] notFound = Encoding.UTF8.GetBytes("<h1>TodoTree HTML bundle not found</h1>");
-            res.StatusCode = 404;
+            if (html == null)
+            {
+                string root = AppDomain.CurrentDomain.BaseDirectory;
+                foreach (string relative in new[] { "TodoTree_一键直达.html", "dist/TodoTree_一键直达.html", "index.html", "dist/index.html" })
+                { string path = Path.Combine(root, relative); if (File.Exists(path)) { html = File.ReadAllText(path, Encoding.UTF8); break; } }
+            }
+            if (html == null) { res.StatusCode = 404; html = "<h1>TodoTree HTML bundle not found</h1>"; }
+            html = html.Replace("<head>", "<head><script>window.__TODOTREE_DESKTOP__=true;</script>");
+            byte[] bytes = Encoding.UTF8.GetBytes(html);
             res.ContentType = "text/html; charset=utf-8";
-            res.OutputStream.Write(notFound, 0, notFound.Length);
-            SafeClose(res);
+            res.OutputStream.Write(bytes, 0, bytes.Length); SafeClose(res);
         }
 
         private static void ServeStaticFile(string urlPath, HttpListenerResponse res)
@@ -564,48 +537,18 @@ namespace TodoTreeHost
             }
         }
 
+        private static void SendJson(HttpListenerResponse res, string value)
+        {
+            res.ContentType = "application/json; charset=utf-8";
+            byte[] bytes = Encoding.UTF8.GetBytes(value);
+            res.OutputStream.Write(bytes, 0, bytes.Length);
+            SafeClose(res);
+        }
+
         private static void SafeAtomicWrite(string targetFilePath, Stream inputStream)
         {
-            lock (_fileLock)
-            {
-                string dir = Path.GetDirectoryName(targetFilePath);
-                if (!Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-
-                string tempPath = targetFilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                string bakPath = targetFilePath + ".bak";
-
-                using (FileStream fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-                {
-                    byte[] buffer = new byte[8192];
-                    int read;
-                    while ((read = inputStream.Read(buffer, 0, buffer.Length)) > 0)
-                    {
-                        fs.Write(buffer, 0, read);
-                    }
-                    fs.Flush();
-                }
-
-                if (File.Exists(targetFilePath))
-                {
-                    try
-                    {
-                        if (File.Exists(bakPath)) File.Delete(bakPath);
-                        File.Copy(targetFilePath, bakPath, true);
-                    }
-                    catch { }
-
-                    try
-                    {
-                        File.Delete(targetFilePath);
-                    }
-                    catch { }
-                }
-
-                File.Move(tempPath, targetFilePath);
-            }
+            using (var reader = new StreamReader(inputStream, Encoding.UTF8))
+                DurableWorkspace.WriteAtomic(targetFilePath, reader.ReadToEnd());
         }
 
         private static void HandlePostTasks(HttpListenerRequest req, HttpListenerResponse res)

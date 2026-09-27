@@ -31,7 +31,7 @@ export const Toast: React.FC<ToastProps> = ({ toast, onClose }) => {
   if (!toast) return null;
 
   return (
-    <div className="fixed bottom-6 right-8 bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-3 z-50 animate-in fade-in slide-in-from-bottom-4 duration-200 select-none">
+    <div role="status" className="task-toast fixed bottom-6 right-8 bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-3 z-50 animate-in fade-in slide-in-from-bottom-4 duration-200 select-none">
       {toast.type === 'complete' && (
         <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0">
           <CheckCircle2 className="w-4 h-4" />

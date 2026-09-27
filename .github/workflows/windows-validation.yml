@@ -1,0 +1,37 @@
+name: Windows persistence and desktop build
+on:
+  push:
+    branches: [gpt-6]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Test real Windows file persistence
+        shell: pwsh
+        run: |
+          $compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          & $compiler /nologo /r:System.Web.Extensions.dll /out:host-tests.exe desktop-host\DurableWorkspace.cs tests\host-persistence.cs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\host-tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: npm run build
+      - run: node bundle-singlefile.mjs
+      - name: Build desktop executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /r:System.Web.Extensions.dll /out:release\TodoTree.exe /resource:dist\TodoTree_一键直达.html desktop-host\Program.cs desktop-host\DurableWorkspace.cs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TodoTree-Windows
+          path: release/TodoTree.exe

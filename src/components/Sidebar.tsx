@@ -1,3 +1,4 @@
+import { MobileNavigation } from './MobileNavigation';
 import React from 'react';
 import { ViewType } from '../types/todo';
 import {
@@ -68,7 +69,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className="w-[208px] h-screen flex-shrink-0 bg-white border-r border-slate-200/80 flex flex-col justify-between select-none">
+    <>
+    <MobileNavigation currentView={currentView} onViewChange={onViewChange} onOpenSettings={onOpenSettings} onOpenCompletedDrawer={onOpenCompletedDrawer} completedTasksCount={completedTasksCount} trashCount={trashCount} />
+    <aside className="desktop-sidebar w-[208px] h-screen flex-shrink-0 bg-white border-r border-slate-200/80 flex flex-col justify-between select-none">
       {/* Top Logo */}
       <div>
         <div className="h-16 px-5 flex items-center gap-2.5">
@@ -118,6 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
           })}
+          <button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-600" onClick={() => window.dispatchEvent(new CustomEvent('todotree:journal'))}><Calendar size={18}/>生活手帐</button>
         </nav>
       </div>
 
@@ -164,5 +168,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
     </aside>
+    </>
   );
 };

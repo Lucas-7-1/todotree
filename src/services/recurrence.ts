@@ -1,6 +1,7 @@
 import { TaskNode, RecurrenceRule, RecurrenceType } from '../types/todo';
 import { generateId } from './treeOperations';
 import { getTodayDateString } from './seedData';
+import { reopenTaskBranch } from './taskLifecycle';
 
 /**
  * Returns a human-friendly label for a recurrence rule, e.g.:
@@ -99,7 +100,7 @@ export function syncRecurringTasks(tasks: TaskNode[]): { updatedTasks: TaskNode[
     return { updatedTasks: tasks, addedCount: 0 };
   }
 
-  const newTasks = [...tasks];
+  let newTasks = [...tasks];
   let addedCount = 0;
 
   for (const [ruleId, { rule, templateTask }] of rulesMap.entries()) {
@@ -177,6 +178,8 @@ export function syncRecurringTasks(tasks: TaskNode[]): { updatedTasks: TaskNode[
       deletion_batch_id: null,
     };
 
+    // A new occurrence is active work, including when the prior branch was archived.
+    if (newTask.parent_id) newTasks = reopenTaskBranch(newTasks, newTask.parent_id);
     newTasks.push(newTask);
     addedCount++;
   }

@@ -1,3 +1,5 @@
+import { isAndroid } from '../services/native/platform';
+import { exportFullBackup, validateWorkspace, WorkspaceSnapshot, isDesktop, loadWorkspace } from '../services/durableStore';
 import React, { useState, useRef, useEffect } from 'react';
 import { TaskNode, AppSettings } from '../types/todo';
 import { AISettings, PromptTemplate } from '../types/ai';
@@ -40,7 +42,7 @@ interface SettingsModalProps {
   settings: AppSettings;
   onUpdateSettings: (newSettings: AppSettings) => void;
   tasks: TaskNode[];
-  onImportTasks: (newTasks: TaskNode[], newSettings?: AppSettings) => void;
+  onImportTasks: (newTasks: TaskNode[], newSettings?: AppSettings, full?: WorkspaceSnapshot) => Promise<void>;
   onResetSeedData: () => void;
   initialTab?: 'general' | 'ai';
 }
@@ -55,10 +57,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onResetSeedData,
   initialTab = 'general',
 }) => {
-  if (!isOpen) return null;
 
   const [activeTab, setActiveTab] = useState<'general' | 'ai'>(initialTab);
   const [importError, setImportError] = useState<string | null>(null);
+  const [storageInfo, setStorageInfo] = useState<any>(null);
+  const [lastSaved, setLastSaved] = useState('');
+  useEffect(() => { if (!isOpen) return;
+    loadWorkspace().then(state => setLastSaved(state.saved_at)).catch(() => {});
+    if (isDesktop()) fetch('/api/storage-info').then(r => r.json()).then(setStorageInfo).catch(() => {});
+  }, [isOpen]);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -88,6 +95,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [initialTab]);
 
   useEffect(() => {
+    if (!isOpen) return;
     loadAISettings().then((s) => {
       setAiSettings(s);
       const curTemplates = s.prompt_templates && s.prompt_templates.length > 0
@@ -95,12 +103,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         : [DEFAULT_PROMPT_TEMPLATE];
       const active = curTemplates.find((t) => t.profile_id === s.default_template_id) || curTemplates[0];
       setTemplateEditContent(active.content);
-    });
-  }, []);
+    }).catch(error => setImportError(error.message));
+  }, [isOpen]);
 
   const handleUpdateAISettings = (newSettings: AISettings) => {
     setAiSettings(newSettings);
-    saveAISettings(newSettings).catch(console.error);
+    saveAISettings(newSettings).catch(error => setImportError(error.message));
   };
 
   const handleSaveTemplate = () => {
@@ -215,18 +223,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     'America/Los_Angeles',
   ];
 
-  const handleExport = () => {
-    const jsonStr = exportBackupData(tasks, settings);
-    downloadJsonFile(jsonStr);
+  const handleExport = async () => {
+    try { await downloadJsonFile(await exportFullBackup()); }
+    catch (error) { setImportError((error as Error).message); }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 32 * 1024 * 1024) { setImportError("备份超过 32 MB，请拆分或使用桌面版恢复"); return; }
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const content = event.target?.result as string;
+      try {
+        const full = JSON.parse(content);
+        if (full.schema_version === 2 && full.data) {
+          validateWorkspace(full);
+          if (confirm(`即将恢复 ${full.data.tasks.length} 项任务、完成历史与报告。现有数据会先建立恢复点，是否继续？`)) {
+            await onImportTasks(full.data.tasks, { ...settings, ...full.data.settings }, full); onClose();
+          }
+          return;
+        }
+      } catch (error) { setImportError((error as Error).message); return; }
       const res = validateImportJson(content);
       if (!res.valid) {
         setImportError(res.error || '校验失败');
@@ -235,8 +254,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setImportError(null);
         setImportSuccess(`校验通过！成功解析 ${res.tasks!.length} 项任务`);
         if (confirm(`即将用备份数据替换当前 ${tasks.length} 项任务，是否确认导入？`)) {
-          onImportTasks(res.tasks!, res.settings);
-          onClose();
+          try { await onImportTasks(res.tasks!, res.settings); onClose(); }
+          catch (error) { setImportError((error as Error).message); }
         }
       }
     };
@@ -244,8 +263,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+    <div className="settings-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[85vh]">
         {/* Header */}
         <div className="p-5 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
@@ -345,16 +366,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="border-t border-slate-100 pt-4 space-y-3">
                 <div className="text-xs font-bold text-slate-800">数据备份与迁移</div>
                 <div className="text-[11px] text-slate-400 leading-relaxed">
-                  数据完整保存在本设备的本地磁盘与 IndexedDB 中。请定期导出 JSON 备份以防清理浏览器数据造成丢失。
+                  桌面版保存到固定数据目录；网页版保存到当前浏览器。完整备份包含任务、完成历史、报告和设置，不包含 API Key。
                 </div>
 
+                <div className="text-xs text-slate-500 break-all">
+                  <p>最近成功保存：{lastSaved || '尚未保存'}</p>
+                  {storageInfo?.directory && <p>数据目录：{storageInfo.directory}</p>}
+                  {isDesktop() && <button className="text-blue-600 mt-2" onClick={() => fetch('/api/open-data-dir', { method: 'POST' }).catch(() => {})}>打开数据目录</button>}
+                </div>
                 <div className="flex gap-3">
                   <button
                     onClick={handleExport}
                     className="flex-1 flex items-center justify-center gap-2 py-2 px-3 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl text-xs font-semibold transition-colors"
                   >
                     <Download className="w-4 h-4" />
-                    <span>导出数据备份 (JSON)</span>
+                    <span>导出任务备份 (JSON，不含手帐)</span>
                   </button>
 
                   <button
@@ -800,8 +826,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
+              {isAndroid() && <p className="text-sm text-slate-600 bg-blue-50 p-3 rounded-lg">手机版首版支持手动复盘，不限制生成次数。关闭应用后暂不执行自动周报、月报。</p>}
               {/* Automated Schedule Plan (PRD 2.3) */}
-              <div className="border-t border-slate-100 pt-3 space-y-3">
+              <div hidden={isAndroid()} className="border-t border-slate-100 pt-3 space-y-3">
                 <div className="text-xs font-bold text-slate-800 flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-blue-600" />

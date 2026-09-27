@@ -1,4 +1,4 @@
-﻿# Dependencies
+# Dependencies
 node_modules/
 
 # Local database & logs
@@ -20,3 +20,9 @@ desktop.ini
 # Environment
 .env
 .env.local
+
+# Android private signing material
+*.jks
+*.keystore
+*.p12
+android/local.properties

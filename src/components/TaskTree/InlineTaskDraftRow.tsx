@@ -4,13 +4,15 @@ import { CornerDownLeft, Plus, X } from 'lucide-react';
 interface InlineTaskDraftRowProps {
   parentId: string;
   level: number;
-  onSubmit: (parentId: string, title: string, continuous: boolean) => void;
-  onCancel: () => void;
+  tempId?: string;
+  onSubmit: (parentId: string, title: string, continuous: boolean) => boolean;
+  onCancel: (tempId?: string) => void;
 }
 
 export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
   parentId,
   level,
+  tempId,
   onSubmit,
   onCancel,
 }) => {
@@ -42,7 +44,11 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
     }
 
     isSavingRef.current = true;
-    onSubmit(parentId, trimmed, continuous);
+    if (!onSubmit(parentId, trimmed, continuous)) {
+      isSavingRef.current = false;
+      inputRef.current?.focus();
+      return;
+    }
     if (continuous) {
       setTitle('');
       isSavingRef.current = false;
@@ -66,7 +72,7 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
     } else if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      onCancel();
+      onCancel(tempId);
     }
   };
 
@@ -77,7 +83,7 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
       if (trimmed) {
         handleCommit(false);
       } else {
-        onCancel();
+        onCancel(tempId);
       }
     }
   };
@@ -86,7 +92,7 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
     <div
       className="relative flex items-center py-1.5 px-3 rounded-lg text-sm bg-blue-50/40 border border-blue-200/90 shadow-2xs my-0.5 animate-in fade-in duration-100"
       style={{
-        paddingLeft: `${Math.max(12, level * 26)}px`,
+        paddingLeft: `max(8px, calc(${level} * var(--tree-indent, 26px)))`,
       }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -95,7 +101,7 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
         <div
           className="absolute border-l border-b border-blue-300 pointer-events-none rounded-bl-sm"
           style={{
-            left: `${(level - 1) * 26 + 2}px`,
+            left: `calc(${level-1} * var(--tree-indent, 26px) + 2px)`,
             top: 0,
             width: '14px',
             height: '50%',
@@ -126,17 +132,18 @@ export const InlineTaskDraftRow: React.FC<InlineTaskDraftRowProps> = ({
             isComposingRef.current = false;
           }}
           placeholder="输入子任务名称... (Enter 保存并继续，Esc 取消)"
-          className="flex-1 px-2 py-0.5 text-sm bg-white border border-blue-400 rounded-md outline-none shadow-2xs font-medium text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-500 transition-all"
+          className="min-w-0 flex-1 px-2 py-0.5 text-sm bg-white border border-blue-400 rounded-md outline-none shadow-2xs font-medium text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-500 transition-all"
         />
 
         <div className="flex items-center gap-1.5 text-xs text-slate-400 flex-shrink-0">
-          <span className="flex items-center gap-0.5 text-[11px] bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-500">
+          <button type="button" onPointerDown={e => e.preventDefault()} onClick={() => handleCommit(true)} className="flex items-center gap-0.5 text-[11px] bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-500">
             <CornerDownLeft className="w-3 h-3" />
             <span>保存</span>
-          </span>
+          </button>
           <button
             type="button"
-            onClick={onCancel}
+            onPointerDown={e => e.preventDefault()}
+            onClick={() => onCancel(tempId)}
             className="p-1 text-slate-400 hover:text-slate-600 rounded transition-colors"
             title="取消新增 (Esc)"
           >

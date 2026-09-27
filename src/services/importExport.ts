@@ -1,3 +1,4 @@
+import { isAndroid, NativeWorkspace } from './native/platform';
 import { TaskNode, AppSettings, QuadrantType } from '../types/todo';
 import { getNodeDepth } from './treeOperations';
 
@@ -18,8 +19,13 @@ export function exportBackupData(tasks: TaskNode[], settings: AppSettings): stri
   return JSON.stringify(data, null, 2);
 }
 
-export function downloadJsonFile(content: string, filename = `TodoTree-Backup-${new Date().toISOString().split('T')[0]}.json`): void {
-  const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+export async function downloadJsonFile(content: string, filename = `TodoTree-Backup-${new Date().toISOString().split('T')[0]}.json`): Promise<void> {
+  await downloadTextFile(content, filename, 'application/json');
+}
+
+export async function downloadTextFile(content: string, filename: string, mimeType = 'text/plain'): Promise<void> {
+  if (isAndroid()) { await NativeWorkspace.exportFile({ content, filename, mimeType }); return; }
+  const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

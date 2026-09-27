@@ -33,6 +33,12 @@ import { TaskQuadrantMenuPortal } from './TaskQuadrantMenuPortal';
 import { MatchSnippet } from '../../services/filterEngine';
 
 interface TaskItemRowProps {
+  queuedCompletion?: boolean;
+  onQueueCompletion?: (id: string) => void;
+  selectionMode?: boolean;
+  bulkSelected?: boolean;
+  onLongPress?: (id: string) => void;
+  onBulkSelect?: (id: string, range: boolean) => void;
   task: TaskNode;
   allTasks: TaskNode[];
   level: number;
@@ -42,6 +48,7 @@ interface TaskItemRowProps {
   isSelected: boolean;
   onSelect: (task: TaskNode) => void;
   onToggleComplete: (task: TaskNode, outcomeNote?: string) => void;
+  onArchiveCompleted?: (task: TaskNode) => void;
   onUpdateTitle: (id: string, newTitle: string) => void;
   onUpdateQuadrant: (id: string, quadrant: QuadrantType) => void;
   onUpdateDue: (id: string, dueType: DueType, dateStr: string | null) => void;
@@ -62,6 +69,7 @@ interface TaskItemRowProps {
 }
 
 export const TaskItemRow: React.FC<TaskItemRowProps> = ({
+  onLongPress, queuedCompletion, onQueueCompletion, selectionMode = false, bulkSelected = false, onBulkSelect,
   task,
   allTasks,
   level,
@@ -71,6 +79,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   isSelected,
   onSelect,
   onToggleComplete,
+  onArchiveCompleted,
   onUpdateTitle,
   onUpdateQuadrant,
   onUpdateDue,
@@ -89,6 +98,9 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   matchSnippet,
   isContextOnly = false,
 }) => {
+  const touch = useRef<{ timer?: ReturnType<typeof setTimeout>; x: number; y: number; fired: boolean }>({ x: 0, y: 0, fired: false });
+  const cancelTouch = () => clearTimeout(touch.current.timer);
+  useEffect(() => () => cancelTouch(), []);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState(task.title);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -99,7 +111,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   const [animPhase, setAnimPhase] = useState<'idle' | 'exiting'>('idle');
 
   const isPendingConfirm =
-    pendingConfirmTaskId !== undefined ? pendingConfirmTaskId === task.id : localPendingConfirm;
+    queuedCompletion !== undefined ? queuedCompletion : pendingConfirmTaskId !== undefined ? pendingConfirmTaskId === task.id : localPendingConfirm;
   const leaveTimerRef = useRef<any>(null);
 
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -113,14 +125,14 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   const progress = calculateProgress(allTasks, task.id);
 
   // Descendants count for parent completion prompt
-  const incompleteDescendants = getDescendantTasks(allTasks, task.id).filter(
+  const incompleteDescendants = onQueueCompletion ? [] : getDescendantTasks(allTasks, task.id).filter(
     (t) => !t.deleted_at && t.status === 'open'
   );
   const incompleteDescendantsCount = incompleteDescendants.length;
 
   // Check if completing this task will auto-close ancestors
   const willCloseAncestors: string[] = [];
-  if (task.parent_id) {
+  if (task.parent_id && !onQueueCompletion) {
     let currParentId: string | null = task.parent_id;
     const simulatedDone = new Set<string>([task.id, ...incompleteDescendants.map((d) => d.id)]);
     while (currParentId) {
@@ -142,7 +154,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
 
   // Esc key cancels pending confirmation
   useEffect(() => {
-    if (!isPendingConfirm) return;
+    if (!isPendingConfirm || onQueueCompletion) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         handleCancelPending();
@@ -267,38 +279,11 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
   }, []);
 
   const handleConfirmComplete = () => {
-    if (animPhase !== 'idle') return;
-    const willStayInWorkspace =
-      showCompleted ||
-      (task.parent_id !== null &&
-        hasActiveTaskAncestor(allTasks, task) &&
-        willCloseAncestors.length === 0);
-
-    if (willStayInWorkspace || reducedMotion) {
-      if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
-      else setLocalPendingConfirm(false);
-      onToggleComplete(task);
-      return;
-    }
-
-    setAnimPhase('exiting');
-    // 400ms safety timeout fallback (PRD Section 2)
-    const safetyTimeout = setTimeout(() => {
-      onToggleComplete(task);
-      if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
-      else setLocalPendingConfirm(false);
-      setAnimPhase('idle');
-    }, 400);
-
-    // Primary exit animation duration: 200ms (180ms ~ 240ms range)
-    leaveTimerRef.current = setTimeout(() => {
-      clearTimeout(safetyTimeout);
-      onToggleComplete(task);
-      if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
-      else setLocalPendingConfirm(false);
-      setAnimPhase('idle');
-    }, 200);
+    if (onSetPendingConfirmTaskId) onSetPendingConfirmTaskId(null);
+    else setLocalPendingConfirm(false);
+    onToggleComplete(task);
   };
+  const handleArchive = () => { onArchiveCompleted?.(task); };
 
   const handleCancelPending = () => {
     if (onSetPendingConfirmTaskId) {
@@ -318,12 +303,21 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
 
   return (
     <div
+      data-task-id={task.id}
+      onTouchStart={e => {
+        if (!onLongPress || (e.target as HTMLElement).closest('button,input,textarea')) return;
+        cancelTouch(); const point = e.touches[0]; touch.current = { x: point.clientX, y: point.clientY, fired: false };
+        touch.current.timer = setTimeout(() => { touch.current.fired = true; onLongPress(task.id); }, 500);
+      }}
+      onTouchMove={e => { const p = e.touches[0]; if (Math.abs(p.clientX-touch.current.x)+Math.abs(p.clientY-touch.current.y)>12) cancelTouch(); }}
+      onTouchEnd={cancelTouch} onTouchCancel={cancelTouch}
+      onClickCapture={e => { if (touch.current.fired) { e.preventDefault(); e.stopPropagation(); touch.current.fired = false; } }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={() => onSelect(task)}
+      onClick={(e) => selectionMode ? !isContextOnly && onBulkSelect?.(task.id, e.shiftKey) : onSelect(task)}
       className={`group relative flex items-center justify-between py-2 px-3 rounded-lg text-sm border border-transparent cursor-pointer ${
-        isSelected
+        (selectionMode ? bulkSelected : isSelected)
           ? 'bg-blue-50/70 border-blue-200/80 shadow-xs'
           : isContextOnly
           ? 'opacity-60 bg-slate-50/40 hover:opacity-100'
@@ -342,7 +336,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
         dropIndicator === 'inside' ? 'bg-blue-100/50 !border-blue-400' : ''
       }`}
       style={{
-        paddingLeft: `${Math.max(12, level * 26)}px`,
+        paddingLeft: `max(8px, calc(${level} * var(--tree-indent, 26px)))`,
         transition:
           animPhase === 'exiting'
             ? 'transform 200ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms cubic-bezier(0.4, 0, 0.2, 1)'
@@ -354,7 +348,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
         <div
           className="absolute border-l border-b border-slate-200 pointer-events-none rounded-bl-sm"
           style={{
-            left: `${(level - 1) * 26 + 2}px`,
+            left: `calc(${level-1} * var(--tree-indent, 26px) + 2px)`,
             top: 0,
             width: '14px',
             height: '50%',
@@ -387,7 +381,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
 
         {/* Dedicated Drag Handle */}
         <div
-          draggable
+          draggable={!selectionMode}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onClick={(e) => e.stopPropagation()}
@@ -397,10 +391,14 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
           <GripVertical className="w-3.5 h-3.5" />
         </div>
 
+        {selectionMode && <input type="checkbox" aria-label={`选择 ${task.title}`} checked={bulkSelected} disabled={isContextOnly}
+          onClick={e => { e.stopPropagation(); if (!isContextOnly) onBulkSelect?.(task.id, e.shiftKey); }} onChange={() => {}} className="w-4 h-4 accent-blue-600" />}
         {/* Complete Checkbox with 2-step confirmation preview */}
         <button
+          disabled={selectionMode}
           onClick={(e) => {
             e.stopPropagation();
+            if (onQueueCompletion && !isDone) { onQueueCompletion(task.id); return; }
             if (isDone) {
               onToggleComplete(task);
             } else {
@@ -424,7 +422,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
         </button>
 
         {/* COMPACT Inline Confirmation Bar: Located IMMEDIATELY next to checkbox (<= 160px pointer distance) */}
-        {isPendingConfirm && (
+        {isPendingConfirm && !onQueueCompletion && (
           <div
             className="flex items-center gap-1.5 mr-2 bg-emerald-50/95 border border-emerald-300 px-2 py-0.5 rounded-lg shadow-xs z-20 animate-in fade-in duration-100 flex-shrink-0"
             onClick={(e) => e.stopPropagation()}
@@ -477,7 +475,7 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
           >
             <span
               className={`strikethrough-animate font-medium text-sm transition-colors truncate ${
-                isDone || isPendingConfirm ? 'is-done text-slate-400' : isContextOnly ? 'text-slate-500' : 'text-slate-800'
+                isDone ? 'is-done text-slate-400' : isContextOnly ? 'text-slate-500' : 'text-slate-800'
               }`}
             >
               {task.title}
@@ -561,23 +559,31 @@ export const TaskItemRow: React.FC<TaskItemRowProps> = ({
               </span>
             )}
 
-            {/* Quick in-place add subtask button on hover */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerAddChild();
-              }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all flex-shrink-0"
-              title="原位添加子任务"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
           </div>
         )}
+        {isDone && !task.archived_at && onArchiveCompleted && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); handleArchive(); }}
+            disabled={animPhase !== 'idle'}
+            title="归档此已完成任务，其他子任务继续保留"
+            className="flex-shrink-0 px-2 py-0.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-200"
+          >搞定</button>
+        )}
+        {/* Keep the action outside the truncated title, at every permitted depth. */}
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); triggerAddChild(); }}
+          className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded flex-shrink-0 focus-visible:ring-2 focus-visible:ring-blue-500"
+          title="原位添加子任务"
+          aria-label={`为「${task.title}」添加子任务`}
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Right Meta Columns */}
-      <div className="flex items-center gap-6 flex-shrink-0">
+      <div className="task-row-meta flex items-center gap-6 flex-shrink-0">
         {/* Deadline Column */}
         <div className="w-20 text-center">
           {dateInfo.label !== '-' ? (

@@ -1,3 +1,4 @@
+import { apiFetch } from '../native/platform';
 import { AISettings, FactsPackage, GenerationSnapshot, OutboundInspectionResult } from '../../types/ai';
 import { buildSystemPrompt, formatUserMessage, DEFAULT_PROMPT_TEMPLATE } from './prompts';
 import { computeContentHash } from './hashUtils';
@@ -235,15 +236,14 @@ export async function callOpenAICompatible(
   }
 
   const startTime = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 90000);
+  const forwardAbort = () => controller.abort();
+  if (options?.signal?.aborted) controller.abort();
+  options?.signal?.addEventListener('abort', forwardAbort, { once: true });
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 90000);
 
-    if (options?.signal) {
-      options.signal.addEventListener('abort', () => controller.abort());
-    }
-
-    const resp = await fetch(url, {
+    const resp = await apiFetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
@@ -292,7 +292,7 @@ export async function callOpenAICompatible(
       isRetryable: isTimeout,
       inspection,
     };
-  }
+  } finally { clearTimeout(timeoutId); options?.signal?.removeEventListener('abort', forwardAbort); }
 }
 
 /**
@@ -318,11 +318,11 @@ export async function testConnection(
   }
 
   const start = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    const resp = await fetch(url, {
+    const resp = await apiFetch(url, {
       method: 'GET',
       headers,
       signal: controller.signal,
@@ -348,5 +348,5 @@ export async function testConnection(
       success: false,
       message: `无法连接到端点: ${err.message}`,
     };
-  }
+  } finally { clearTimeout(timeoutId); }
 }
