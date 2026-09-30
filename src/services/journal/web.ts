@@ -4,6 +4,7 @@ import {
   validateJournal,
   matchesJournal,
   compareJournal,
+  compareJournalTime,
   journalId,
 } from "./model";
 const request = <T>(r: IDBRequest<T>) =>
@@ -68,7 +69,7 @@ export async function journalWeb(o: any): Promise<any> {
     } else if (o.action === 'children' || o.action === 'branch') {
       const ix = journalIndex(await request(table('entries').getAll()));
       if (o.action === 'branch') result = {count:ix.descendants(o.id).filter(e=>!e.deleted_at).length};
-      else { const rows=(ix.children.get(o.parent_id || null)||[]).filter(e=>!e.deleted_at && (!o.book_id || e.book_id===o.book_id));
+      else { const rows=(ix.children.get(o.parent_id || null)||[]).filter(e=>!e.deleted_at && (!o.book_id || e.book_id===o.book_id)).sort((a,b)=>compareJournalTime(a,b,o.sort||'event',o.direction||'asc'));
         result={entries:rows.slice(o.offset || 0,(o.offset || 0)+20).map(ix.summary),total:rows.length}; }
     } else if (o.action === "list" || o.action === "month") {
       const allEntries = (await request(table("entries").getAll())) as JournalEntry[];

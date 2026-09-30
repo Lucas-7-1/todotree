@@ -52,7 +52,9 @@ export function initTabLock(onLockChange: (isOwner: boolean) => void): () => voi
 
   // Check if someone else holds it
   const activeTab = localStorage.getItem(TAB_LOCK_KEY);
-  if (!activeTab || activeTab === CURRENT_TAB_ID) {
+  const previousDocumentId = sessionStorage.getItem(TAB_LOCK_KEY);
+  // Reload keeps sessionStorage but creates a new document id. Reclaim only this session's previous ownership; another tab still wins through claim messages and revision checks.
+  if (!activeTab || activeTab === CURRENT_TAB_ID || activeTab === previousDocumentId) {
     claimLock();
   } else {
     // Another tab exists, become read-only initially, but permit user takeover

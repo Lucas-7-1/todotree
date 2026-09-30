@@ -2,7 +2,7 @@ name: Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [gpt-6-android-v1]
+    branches: [gpt-6-android-v1, gpt-6-life-v3]
     paths-ignore: ['docs/**', '**.md']
 permissions:
   contents: read
@@ -31,6 +31,7 @@ jobs:
           npx playwright install --with-deps chromium
           node tests/journal-browser-smoke.cjs
           node tests/journal-tree-browser.cjs
+          node tests/health-browser.cjs
         env:
           MOBILE_QA_DIR: /tmp/journal-browser-qa
       - name: Preserve browser review screenshots

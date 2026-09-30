@@ -1,4 +1,4 @@
-import { AppModeSwitch, rememberMode } from '../AppModeSwitch';
+import { AppModeSwitch, rememberMode, AppMode } from '../AppModeSwitch';
 import { JournalCarousel } from './JournalCarousel';
 import { JournalTree } from './JournalTree';
 function readJournalView(): any { try {return JSON.parse(localStorage.getItem('todotree.journal.view.v1')||'{}');}catch{return {};}}
@@ -42,6 +42,7 @@ import {
   monthRange,
   newJournal,
   shiftMonth,
+  expenseLabel,
 } from "../../services/journal/model";
 import { JournalEditor } from "./JournalEditor";
 import { JournalImage, JournalViewer } from "./JournalImage";
@@ -49,9 +50,11 @@ import "./journal.css";
 export default function JournalApp({
   onClose,
   create = false,
+  onModeChange,
 }: {
   onClose: () => void;
   create?: boolean;
+  onModeChange?: (mode:AppMode)=>void;
 }) {
   const savedView = useRef(readJournalView()).current;
   const [dayExpanded,setDayExpanded]=useState<Set<string>>(new Set());
@@ -125,6 +128,7 @@ export default function JournalApp({
   const refresh = () => setRevision((n) => n + 1);
   const changed = (message:string, undoId?:string) => {setNotice(message);setUndo(undoId||null);refresh();};
   useEffect(()=>{ try {localStorage.setItem('todotree.journal.view.v1',JSON.stringify({selected,month,week,mode,book}));} catch {} },[selected,month,week,mode,book]);
+  const changeMode = async (mode:AppMode) => {if(busyRef.current || (treeGuard.current && !(await treeGuard.current())))return;onModeChange?.(mode);};
   const leave = async () => { if(busyRef.current || (treeGuard.current && !(await treeGuard.current())))return; onClose(); };
   const openDetail = async (entry:JournalEntry) => { if(treeGuard.current && !(await treeGuard.current()))return;setDetail(await journal.get(entry.id)); };
   useEffect(()=>{ if(!detail)return;let live=true;journal.get(detail.id).then(e=>live&&setDetail(e)).catch(()=>{if(live)setDetail(null);});return()=>{live=false;}; },[revision]);
@@ -361,7 +365,7 @@ export default function JournalApp({
   );
   return (
     <section className="j-shell" aria-label="生活手帐">
-      {!detail && !editing && !trash && <AppModeSwitch mode="journal" disabled={busy} onChange={()=>void leave()} /> }
+      {!detail && !editing && !trash && <AppModeSwitch mode="journal" disabled={busy} onChange={mode=>void changeMode(mode)} /> }
       <header className="j-header">
         <button
           className="j-icon"
@@ -699,7 +703,7 @@ export default function JournalApp({
                     {e.event_time || "未标时间"}
                     {e.location_text ? ` · ${e.location_text}` : ""}
                   </small>
-                  <h3>{journalTitle(e)}</h3>
+                  <h3>{journalTitle(e)}</h3>{expenseLabel(e)&&<p className="j-price">{expenseLabel(e)}</p>}
                   {e.title && e.description && <p>{e.description}</p>}
                   {e.reflection && (
                     <p className="j-reflection">{e.reflection}</p>
@@ -815,7 +819,7 @@ export default function JournalApp({
             )}
           </header>
           <div className="j-scroll j-detail-body">
-            <h2>{journalTitle(detail)}</h2>
+            <h2>{journalTitle(detail)}</h2>{expenseLabel(detail)&&<p className="j-price">{expenseLabel(detail)}</p>}{detail.place_url&&<a className="j-place-link" href={detail.place_url} target="_blank" rel="noreferrer">打开保存的地点链接 ↗</a>}
             <small>
               {detail.event_time || "未标时间"}
               {detail.location_text ? ` · ${detail.location_text}` : ""}

@@ -85,7 +85,9 @@ final class JournalTree {
     if(!JournalStore.text(o,"book_id").isEmpty()){where+=" AND book_id=?";args.add(o.getString("book_id"));}
     String[] params=args.toArray(new String[0]);int count;
     try(Cursor c=db.rawQuery("SELECT COUNT(*) FROM entries WHERE "+where,params)){c.moveToFirst();count=c.getInt(0);}
-    JSONArray rows=new JSONArray();try(Cursor c=db.query("entries",new String[]{"body"},where,params,null,null,"sort_order,created_at,id",Math.max(0,o.optInt("offset"))+",20")) {while(c.moveToNext())rows.put(decorate(new JSONObject(c.getString(0)),true));}
+    String direction=o.optString("direction","asc").equals("desc")?" DESC":" ASC";
+    String order=o.optString("sort","event").equals("created")?"created_at"+direction+",id"+direction:"event_date"+direction+",CASE WHEN sort_time='99:99' THEN 1 ELSE 0 END,sort_time"+direction+",created_at,id";
+    JSONArray rows=new JSONArray();try(Cursor c=db.query("entries",new String[]{"body"},where,params,null,null,order,Math.max(0,o.optInt("offset"))+",20")) {while(c.moveToNext())rows.put(decorate(new JSONObject(c.getString(0)),true));}
     return new JSONObject().put("entries",rows).put("total",count);
   }
   JSONObject branch(String id) throws Exception {int n=0;for(JSONObject e:descendants(id))if(!deleted(e))n++;return new JSONObject().put("count",n);}

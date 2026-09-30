@@ -7,6 +7,9 @@ export default defineConfig({
   base: './',
   server: {
     port: 3000,
-    open: false
+    open: false,
+    watch: {
+      ignored: ['**/android/**/build/**', '**/android/app/src/main/assets/public/**']
+    }
   }
 })

@@ -47,7 +47,9 @@ const fs = require('node:fs/promises');
   await page.getByRole('button',{name:'事件树',exact:true}).click();await page.getByRole('button',{name:'整理',exact:true}).click();
   const handle=page.getByRole('button',{name:'拖动：江湖烤鸡',exact:true});await handle.scrollIntoViewIfNeeded();
   const target=page.locator('[data-j-node="review-shop"]');await target.waitFor();const h=await handle.boundingBox(),t=await target.boundingBox();
-  await page.mouse.move(h.x+h.width/2,h.y+h.height/2);await page.mouse.down();await page.waitForTimeout(360);await page.mouse.move(t.x+t.width/2,t.y+t.height/2,{steps:12});await page.waitForTimeout(420);await page.mouse.up();
+  await page.mouse.move(h.x+h.width/2,h.y+h.height/2);await page.mouse.down();await page.waitForTimeout(360);let dest=t;
+  if(dest.y+dest.height/2>790){const scroll=await page.locator('.j-scroll').boundingBox();await page.mouse.move(h.x,scroll.y+scroll.height-8,{steps:8});for(let i=0;i<20;i++){await page.waitForTimeout(80);dest=await target.boundingBox();if(dest.y+dest.height<scroll.y+scroll.height-15)break;}}
+  await page.mouse.move(dest.x+80,dest.y+dest.height/2,{steps:12});await page.waitForTimeout(420);await page.mouse.up();
   await page.locator('.j-toast').getByText('已移动，日期和照片保持原样').waitFor();
   const child=await page.evaluate(async()=>{const {journal}=await import('/src/services/journal/store.ts');return (await journal.children('review-shop')).entries[0];});assert.equal(child.title,'江湖烤鸡');
   await page.screenshot({path:out+'/tree-moved.png'});await page.locator('.j-toast').getByRole('button',{name:'撤销',exact:true}).click();await page.locator('.j-toast').getByText('已撤销操作').waitFor();assert.equal((await get(child.id)).parent_id,'review-root');

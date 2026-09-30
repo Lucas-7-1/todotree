@@ -24,6 +24,7 @@ interface Props {
   onOpen: () => void;
   onMenu: () => void;
   onArchive: () => void;
+  onStartWorkout?: () => void;
 }
 export function MobileTaskRow(p: Props) {
   const { task: t } = p;
@@ -67,6 +68,7 @@ export function MobileTaskRow(p: Props) {
         <button className="m-task-open" onClick={p.onOpen} data-drag-title={p.draggable ? t.id : undefined}>
           <span className="m-task-title">{t.title}</span>
         </button>
+        {p.onStartWorkout && !p.selecting && <button className="m-workout-start" disabled={p.disabled} onClick={p.onStartWorkout}>开始训练</button>}
         {p.path && <span className="m-task-path">{p.path}</span>}
         <span className="m-task-meta">
           {p.childrenCount > 0 && (

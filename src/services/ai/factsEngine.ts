@@ -516,6 +516,11 @@ export function buildFactsPackage(
     now?: Date;
   }
 ): FactsPackage {
+  // Personal health remains outside work reports, including historical events.
+  const healthIds=new Set(tasks.filter(t=>t.health_occurrence_id).map(t=>t.id));
+  for(let depth=0;depth<5;depth++)for(const t of tasks)if(t.parent_id&&healthIds.has(t.parent_id))healthIds.add(t.id);
+  tasks=tasks.filter(t=>!healthIds.has(t.id));
+  events=events.filter(e=>!e.health_occurrence_id&&!healthIds.has(e.task_id)&&!e.task_id.startsWith('health-task-')&&!e.path_ids_at_completion?.some(id=>healthIds.has(id)||id.startsWith('health-task-')));
   const period = computeReportPeriod(reportType, timezone, {
     isPrevious: options.isPrevious,
     customStartDate: options.customStartDate,

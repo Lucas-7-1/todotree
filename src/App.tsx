@@ -1,4 +1,7 @@
-import { AppModeSwitch, readMode, rememberMode } from './components/AppModeSwitch';
+import { AppMode, AppModeSwitch, readMode, rememberMode, requestMode } from './components/AppModeSwitch';
+import { HealthEntity, workoutTask, closeWorkoutTask, healthDay } from './services/health/model';
+import { HealthNative } from './services/health/store';
+import { ensureHealthDay, syncWorkoutOutbox } from './services/health/actions';
 import { applyTaskMove, TaskMove } from './services/taskMove';
 import { MobileWorkspace } from './components/Mobile/MobileWorkspace';
 import { useMobileLayout } from './components/Mobile/useMobile';
@@ -78,10 +81,30 @@ import {
 import { buildFactsPackage } from './services/ai/factsEngine';
 
 const JournalApp = React.lazy(() => import('./components/Journal/JournalApp'));
+const HealthApp = React.lazy(() => import('./components/Health/HealthApp'));
 
 export const App: React.FC = () => {
   const [journalState, setJournalState] = useState<{create:boolean}|null>(() => readMode() === 'journal' ? {create:false} : null);
-  useEffect(() => { const open=async(event:Event)=>{ if (pendingNavigationGuard.current && !(await pendingNavigationGuard.current())) return; setJournalState({create:!!(event as CustomEvent).detail?.create}); };window.addEventListener('todotree:journal',open);return()=>window.removeEventListener('todotree:journal',open); }, []);
+  const [healthState, setHealthState] = useState<{occurrenceId:string|null;sessionId?:string}|null>(() => readMode() === 'health' ? {occurrenceId:null} : null);
+  const changeMode = async (mode:AppMode, occurrenceId:string|null=null, create=false) => {
+    if (pendingNavigationGuard.current && !(await pendingNavigationGuard.current())) return;
+    rememberMode(mode); setJournalState(mode==='journal'?{create}:null); setHealthState(mode==='health'?{occurrenceId}:null);
+  };
+  const modeHandler = useRef(changeMode); modeHandler.current = changeMode;
+  useEffect(() => {
+    const open=(event:Event)=>void modeHandler.current('journal',null,!!(event as CustomEvent).detail?.create);
+    const switchMode=(event:Event)=>{const mode=(event as CustomEvent).detail?.mode;if(['tasks','journal','health'].includes(mode))void modeHandler.current(mode);};
+    window.addEventListener('todotree:journal',open); window.addEventListener('todotree:mode',switchMode);
+    return()=>{window.removeEventListener('todotree:journal',open);window.removeEventListener('todotree:mode',switchMode);};
+  }, []);
+  useEffect(()=>{
+    if(!isAndroid())return;let alive=true;let remove:(()=>void)|undefined;
+    const open=(id:string|null)=>{if(!alive||!id)return;rememberMode('health');setJournalState(null);setHealthState({occurrenceId:null,sessionId:id});};
+    void HealthNative.takeLaunchSession().then(e=>open(e.session_id)).catch(()=>{});
+    void HealthNative.addListener('openSession',e=>open(e.session_id)).then(h=>{if(alive)remove=()=>void h.remove();else void h.remove();});
+    return()=>{alive=false;remove?.();};
+  },[]);
+  useEffect(()=>{document.querySelectorAll<HTMLElement>('.main-workspace,.sidebar,.mobile-navigation').forEach(el=>{el.toggleAttribute('inert',!!journalState||!!healthState);});},[journalState,healthState]);
   const mobileLayout = useMobileLayout();
   const mobileCommitLock = useRef(false);
   useEffect(() => { document.documentElement.classList.toggle('mobile-layout', mobileLayout); return () => document.documentElement.classList.remove('mobile-layout'); }, [mobileLayout]);
@@ -438,6 +461,29 @@ export const App: React.FC = () => {
       } finally { writesInFlight.current--; }
     }, []
   );
+
+  const linkWorkout = useCallback(async (occ:HealthEntity, type:'create'|'complete'):Promise<string|null> => {
+    if (!loaded || !isTabOwner || storageError || failedSaveRef.current || writesInFlight.current || mobileCommitLock.current) throw Error('待办正在保存或恢复，请稍后重试同步');
+    mobileCommitLock.current=true;
+    try {
+      const before=tasksRef.current, linked=workoutTask(occ,before);
+      // A deleted linked task is an explicit user choice; do not silently resurrect it.
+      if (type==='create' && linked.task.deleted_at) throw Error('关联待办已在回收站，请先恢复它');
+      if (type==='complete' && !before.some(task=>task.id===(occ.body.task_id||linked.task.id))) throw Error('训练已保存，等待本次待办先同步成功');
+      const next=type==='complete'?closeWorkoutTask(before,occ.body.task_id||linked.task.id):linked.tasks;
+      if(next!==before && !(await updateTasksWithSave(next,type==='create'?'加入今日训练':'保存训练并完成本次安排',true,true))) throw Error('待办保存失败，训练记录已保留');
+      return linked.task.id;
+    } finally {mobileCommitLock.current=false;}
+  },[loaded,isTabOwner,storageError,updateTasksWithSave]);
+  const workoutLinkRef=useRef(linkWorkout);workoutLinkRef.current=linkWorkout;
+  useEffect(()=>{
+    if(!loaded||!isTabOwner)return;
+    let alive=true;
+    const sync=()=>{if(alive)void ensureHealthDay(healthDay(),true).then(()=>syncWorkoutOutbox((occ,type)=>workoutLinkRef.current(occ,type))).catch(()=>{/* Health UI exposes recovery; never replace task data with an empty health load. */});};
+    sync();let lastDay=healthDay();const resume=()=>{if(!document.hidden){lastDay=healthDay();sync();}};document.addEventListener('visibilitychange',resume);
+    const midnight=setInterval(()=>{const currentDay=healthDay();if(!document.hidden&&currentDay!==lastDay){lastDay=currentDay;sync();}},60000);
+    return()=>{alive=false;clearInterval(midnight);document.removeEventListener('visibilitychange',resume);};
+  },[loaded,isTabOwner]);
 
   const handleBulkAction = async (ids: string[], action: BulkAction): Promise<boolean> => {
     if (batchBusy || saveStatus === 'saving' || !loaded || !isTabOwner || storageError) return false;
@@ -1327,7 +1373,8 @@ export const App: React.FC = () => {
   return (
     <div className="app-shell flex h-screen w-screen overflow-hidden bg-[#f8fafc] text-slate-800">
       {/* 1. Left Sidebar */}
-      {journalState && <React.Suspense fallback={<div className="fixed inset-0 z-[180] bg-white p-8">正在翻开手帐…</div>}><JournalApp create={journalState.create} onClose={() => { rememberMode('tasks'); setJournalState(null); }} /></React.Suspense>}
+      {journalState && <React.Suspense fallback={<div className="fixed inset-0 z-[180] bg-white p-8">正在翻开手帐…</div>}><JournalApp create={journalState.create} onClose={() => void changeMode('tasks')} onModeChange={mode=>void changeMode(mode)} /></React.Suspense>}
+      {healthState && <React.Suspense fallback={<div className="fixed inset-0 z-[180] bg-white p-8">正在读取健康记录…</div>}><HealthApp tasks={tasks} occurrenceId={healthState.occurrenceId} launchSessionId={healthState.sessionId} onModeChange={mode=>void changeMode(mode)} onLink={linkWorkout}/></React.Suspense>}
       <Sidebar
         currentView={currentView}
         onViewChange={async (view) => {
@@ -1354,7 +1401,7 @@ export const App: React.FC = () => {
 
       {/* 2. Middle Main Workspace */}
       <main className="main-workspace flex-1 flex flex-col min-w-0 h-screen overflow-hidden relative">
-        {(!mobileLayout || !['today','tree','quadrant'].includes(currentView)) && <AppModeSwitch mode="tasks" onChange={() => window.dispatchEvent(new CustomEvent('todotree:journal'))} />}
+        {(!mobileLayout || !['today','tree','quadrant'].includes(currentView)) && <AppModeSwitch mode="tasks" onChange={requestMode} />}
         {/* Reconnection Alert Banner (Bounded Auto-Recovery & Diagnostic actions) */}
         {isServerDisconnected && (
           <div
@@ -1443,11 +1490,11 @@ export const App: React.FC = () => {
         <div className="flex-1 flex min-h-0 overflow-hidden relative">
           {mobileLayout && <MobileWorkspace tasks={tasks} view={currentView} timezone={settings.timezone}
             saveStatus={saveStatus} disabled={!loaded || !isTabOwner || !!storageError || batchBusy || saveStatus === 'saving'}
-            overlayOpen={!!journalState || auxiliaryPanel.type !== 'none' || isSettingsModalOpen || isCreateModalOpen || isTemplateModalOpen}
+            overlayOpen={!!journalState || !!healthState || auxiliaryPanel.type !== 'none' || isSettingsModalOpen || isCreateModalOpen || isTemplateModalOpen}
             onMove={handleTaskMove} onCreate={handleMobileCreate} onBulk={handleBulkAction} onSelect={handleSelectTask}
             onRestore={handleRestoreTask} onArchive={handleArchiveCompleted} onCompleted={() => openAuxiliaryPanel('completed')}
             onUndo={handleUndo} canUndo={undoManager.canUndo()} onPrepareComplete={closeAuxiliaryPanel}
-            onViewChange={setCurrentView} />}
+            onViewChange={setCurrentView} onStartWorkout={id=>void changeMode('health',id)} />}
 
           {!mobileLayout && currentView === 'tree' && (
             <div className="flex-1 flex flex-col min-w-0 h-full">

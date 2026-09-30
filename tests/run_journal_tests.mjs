@@ -21,24 +21,26 @@ const {
   journalHasContent,
   compareJournal,
   matchesJournal,
-  journalTitle,
+  journalTitle, compareJournalTime, minorAmount, expenseTotals,
 } = createRequire(import.meta.url)(path.join(folder, "model.cjs"));
 const record = (extra = {}) => ({
   ...newJournal("2026-01-01").entry,
   ...extra,
 });
-test("journal accepts image-only, reflection-only and rating-only records, rejects metadata-only shells", () => {
+test("journal accepts image-only, reflection-only and rating-only records, accepts location/expense facts and rejects tag-only shells", () => {
   for (const values of [
     { images: ["image"] },
     { reflection: "很放松" },
     { rating: 4 },
     { title: "散步" },
+    { location_text: "贵阳" },
+    { expense: {id:"a",bill_id:"a",role:"independent",currency:"CNY",amount_minor:0,personal_minor:null} },
   ]) {
     assert.doesNotThrow(() => validateJournal(record(values)));
     assert.ok(journalHasContent(record(values)));
   }
   assert.throws(
-    () => validateJournal(record({ location_text: "贵阳", tags: ["旅行"] })),
+    () => validateJournal(record({ tags: ["旅行"] })),
     /写点内容/,
   );
 });
@@ -139,4 +141,18 @@ test('journal sibling reorder affects neither completion nor historical calendar
   assert.equal(next.filter(e=>matchesJournal(e,{date:'2026-01-01'})).length,2);
   assert.equal(next.filter(e=>matchesJournal(e,{date:'2026-01-02'})).length,1);
   assert.ok(next.every(e=>!('status' in e)));
+});
+
+test("journal event and input ordering differ without rewriting historical timestamps",()=>{
+  const a=record({id:'a',event_date:'2026-01-01',event_time:null,created_at:'2026-01-04T00:00:00Z'}),b=record({id:'b',event_date:'2026-01-02',event_time:'12:00',created_at:'2026-01-03T00:00:00Z'});
+  assert.deepEqual([b,a].sort((x,y)=>compareJournalTime(x,y,'event','asc')).map(x=>x.id),['a','b']);
+  assert.deepEqual([a,b].sort((x,y)=>compareJournalTime(x,y,'created','asc')).map(x=>x.id),['b','a']);
+  assert.deepEqual([a,b].sort((x,y)=>compareJournalTime(x,y,'created','desc')).map(x=>x.id),['a','b']);
+});
+test("journal expenses use cents and never double-count bill and dish",()=>{
+  assert.equal(minorAmount('12.34'),1234);assert.equal(minorAmount(''),null);assert.equal(minorAmount('0'),0);assert.throws(()=>minorAmount('1.234'));
+  const expense=(id,role,amount,personal,currency='CNY')=>record({expense:{id,bill_id:'meal',role,currency,amount_minor:amount,personal_minor:personal}});
+  const sums=expenseTotals([expense('bill','bill',10000,5000),expense('dish','item',3000,null),expense('taxi','independent',2000,2000)]);
+  assert.equal(sums.CNY.amount,12000);assert.equal(sums.CNY.personal,7000);
+  assert.throws(()=>validateJournal(expense('bad','bill',-1,null)));
 });

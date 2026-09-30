@@ -24,6 +24,7 @@ export interface TaskEvent {
   recurrence_rule_id?: string | null;
   occurrence_key?: string | null;
   is_leaf_at_completion?: boolean;
+  health_occurrence_id?: string;
 }
 
 export type AIReportType = 'weekly' | 'monthly' | 'custom';

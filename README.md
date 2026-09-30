@@ -2,6 +2,12 @@
 
 > 深度工作分解、四象限决策、今日聚焦与智能复盘四位一体的个人树状任务管理工具。支持纯离线单文件运行与 Windows 原生免安装桌面宿主。
 
+## Life v3 Android 预览分支
+
+`gpt-6-life-v3` 增加待办 / 手帐 / 健康三模式、事件树排序与拖动、消费信息、体重/饮食/睡眠记录，以及训练计划—今日待办—实际训练闭环。范围与验证见 [实施说明](docs/Life-v3-implementation.md)，完整方向见 [产品 PRD](docs/TodoTree-Product-PRD-v3.0.md)。
+
+预览 debug 包可与旧版并存，不会自动读取旧应用数据；从旧版导出备份后导入预览版。正式覆盖升级仍须使用原签名。构建运行 `npm ci`、`npm test`、`npm run android:sync`，再到 `android` 目录执行 `./gradlew :app:assembleDebug`。仓库已有的静态单文件和 EXE 没有在本次重新打包。
+
 ---
 
 ## 🌟 核心特性与架构全景

@@ -48,7 +48,7 @@ export const journal = {
   native,
   boot: (): Promise<{ books: JournalBook[]; drafts: JournalDraft[] }> =>
     command("boot"),
-  children: (parent_id: string | null, book_id = '', offset = 0): Promise<{entries: JournalEntry[]; total: number}> => command('children', {parent_id, book_id, offset, limit:20}),
+  children: (parent_id: string | null, book_id = '', offset = 0, sort = 'event', direction = 'asc'): Promise<{entries: JournalEntry[]; total: number}> => command('children', {parent_id, book_id, offset, limit:20, sort, direction}),
   branch: (id: string): Promise<{count:number}> => command('branch', {id}),
   get: (id: string): Promise<JournalEntry> => command("get", { id }),
   month: (f: JournalFilter): Promise<JournalMonth> =>

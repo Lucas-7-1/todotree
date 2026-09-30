@@ -1,4 +1,4 @@
-import { AppModeSwitch } from '../AppModeSwitch';
+import { AppModeSwitch, requestMode } from '../AppModeSwitch';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
@@ -46,6 +46,7 @@ interface Props {
   onRestore: (task: TaskNode) => void;
   onArchive: (task: TaskNode) => void;
   onCompleted: () => void;
+  onStartWorkout: (id:string) => void;
   onUndo: () => void;
   canUndo: boolean;
   onPrepareComplete: () => void;
@@ -331,6 +332,7 @@ export function MobileWorkspace(p: Props) {
     <MobileTaskRow
       key={task.id}
       task={task}
+      onStartWorkout={task.health_occurrence_id?()=>p.onStartWorkout(task.health_occurrence_id!):undefined}
       draggable={p.view === 'tree' && !todayView}
       expanded={expandedForRender.has(task.id)}
       onExpand={tree ? () => toggle(setExpanded, task.id) : undefined}
@@ -409,7 +411,7 @@ export function MobileWorkspace(p: Props) {
   const dueReason = target ? taskDueDay(target, p.timezone) : null;
   return (
     <section className="m-workspace" hidden={!active} data-mobile-view={p.view}>
-      {!parent && <AppModeSwitch mode="tasks" disabled={busy || pending.size>0} onChange={() => window.dispatchEvent(new CustomEvent('todotree:journal'))} />}
+      {!parent && <AppModeSwitch mode="tasks" disabled={busy || pending.size>0} onChange={requestMode} />}
       <header className="m-header">
         {((p.view === "tree" && parentId) || calendar) && (
           <button
@@ -984,6 +986,7 @@ export function MobileWorkspace(p: Props) {
                   <Search size={19} />
                   搜索任务
                 </button>
+                <button onClick={()=>{setSheet("none");window.dispatchEvent(new CustomEvent('todotree:global-more'));}}><MoreHorizontal size={19}/>设置、备份与回收站</button>
                 {p.view === "today" && (
                   <button
                     onClick={() => {

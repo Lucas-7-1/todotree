@@ -34,6 +34,7 @@ export interface TaskNode {
   outcome_note?: string;       // Optional completion result note (PRD 3.1 & 3.2)
   background_text?: string;    // Optional background/context note (PRD v1.2 A31)
   instance_id?: string;        // Specific instance identifier (for recurring instances)
+  health_occurrence_id?: string;
   recurrence_rule_id?: string | null;
   recurrence_rule?: RecurrenceRule | null;
   recurrence_period_key?: string | null;

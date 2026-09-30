@@ -5,6 +5,7 @@ public class MainActivity extends BridgeActivity {
     @Override public void onCreate(Bundle state) {
         registerPlugin(NativeWorkspacePlugin.class);
         registerPlugin(JournalPlugin.class);
+        registerPlugin(HealthPlugin.class);
         super.onCreate(state);
     }
 }

@@ -4,6 +4,7 @@ import type { ViewType } from '../types/todo';
 interface Props { currentView: ViewType; onViewChange: (view: ViewType) => void; onOpenSettings: () => void; onOpenCompletedDrawer?: () => void; completedTasksCount: number; trashCount: number }
 export function MobileNavigation(p: Props) {
   const [more, setMore] = useState(false);
+  useEffect(()=>{const open=()=>setMore(true);window.addEventListener('todotree:global-more',open);return()=>window.removeEventListener('todotree:global-more',open);},[]);
   useEffect(() => {
     if (!more) return;
     const close = (e: Event) => { e.preventDefault(); setMore(false); };
@@ -14,7 +15,6 @@ export function MobileNavigation(p: Props) {
   return <>
     <nav className="mobile-navigation" aria-label="手机主导航">
       {items.map(({ id, text, icon: Icon }) => <button key={id} aria-current={p.currentView === id ? 'page' : undefined} onClick={() => { setMore(false); p.onViewChange(id); }}><Icon size={21}/><span>{text}</span></button>)}
-      <button onClick={() => setMore(true)} aria-expanded={more}><Menu size={21}/><span>更多</span></button>
     </nav>
     {more && <div className="mobile-more-backdrop" onClick={() => setMore(false)}>
       <section className="mobile-more" role="dialog" aria-label="更多功能" onClick={e => e.stopPropagation()}>

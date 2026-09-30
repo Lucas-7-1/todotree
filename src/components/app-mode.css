@@ -3,5 +3,5 @@
 .app-mode-switch button{position:relative;min-width:62px;min-height:44px;padding:0 12px;font-size:13px;color:#78827b;isolation:isolate}
 .app-mode-switch button::before{content:'';position:absolute;inset:5px 0;background:#f1f3ef;border-radius:9px;z-index:-1}
 .app-mode-switch button[aria-pressed=true]{color:white;font-weight:650}
-.app-mode-switch button[aria-pressed=true]::before{background:#397965}
+.app-mode-switch button[aria-pressed=true]::before{background:#2563eb}
 .app-mode-switch button:disabled{opacity:.5}

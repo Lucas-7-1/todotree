@@ -33,6 +33,12 @@ public final class JournalStore extends SQLiteOpenHelper {
     setWriteAheadLoggingEnabled(true);
   }
 
+  @Override public void onOpen(SQLiteDatabase db) {
+    super.onOpen(db);
+    db.execSQL("CREATE INDEX IF NOT EXISTS entries_parent_event ON entries(parent_id,deleted_at,event_date,sort_time,created_at,id)");
+    db.execSQL("CREATE INDEX IF NOT EXISTS entries_parent_created ON entries(parent_id,deleted_at,created_at,id)");
+  }
+
   @Override
   public void onCreate(SQLiteDatabase db) {
     db.execSQL(
@@ -229,9 +235,15 @@ public final class JournalStore extends SQLiteOpenHelper {
       text(e, "title").trim().isEmpty() &&
       text(e, "description").trim().isEmpty() &&
       text(e, "reflection").trim().isEmpty() &&
-      e.isNull("rating") &&
+      e.isNull("rating") && text(e,"location_text").trim().isEmpty() &&
+      (e.optJSONObject("expense")==null || (e.optJSONObject("expense").isNull("amount_minor") && e.optJSONObject("expense").isNull("personal_minor"))) &&
       array(e, "images").length() == 0
     ) throw new Exception("写点内容或添加照片再保存");
+    JSONObject expense=e.optJSONObject("expense");
+    if(expense!=null) {
+      if(text(expense,"id").isEmpty()||text(expense,"bill_id").isEmpty()||!Arrays.asList("bill","item","independent").contains(text(expense,"role"))||!Arrays.asList("CNY","USD","EUR","JPY","HKD").contains(text(expense,"currency")))throw new Exception("消费格式无效");
+      for(String key:new String[]{"amount_minor","personal_minor"})if(!expense.isNull(key)&&(expense.getDouble(key)!=expense.getLong(key)||expense.getLong(key)<0||expense.getLong(key)>99999999999L))throw new Exception("金额无效");
+    }
   }
 
   void putEntry(SQLiteDatabase db, JSONObject e) throws Exception {

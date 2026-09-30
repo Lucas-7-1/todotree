@@ -18,6 +18,7 @@ import {
   journalId,
   journalToday,
   validateJournal,
+  minorAmount,
 } from "../../services/journal/model";
 import { journal } from "../../services/journal/store";
 import { JournalImage } from "./JournalImage";
@@ -38,7 +39,9 @@ export function JournalEditor(p: Props) {
     [importing, setImporting] = useState(false),
     [progress, setProgress] = useState(""),
     [failures, setFailures] = useState<string[]>([]),
-    [more, setMore] = useState(false),
+    [more, setMore] = useState(!!p.draft.entry.parent_id),
+    [amountInput,setAmountInput] = useState(p.draft.entry.expense?.amount_minor == null ? '' : (p.draft.entry.expense.amount_minor/100).toFixed(2)),
+    [personalInput,setPersonalInput] = useState(p.draft.entry.expense?.personal_minor == null ? '' : (p.draft.entry.expense.personal_minor/100).toFixed(2)),
     [bookName, setBookName] = useState(""),
     [confirmDiscard, setConfirmDiscard] = useState(false),
     [dragging, setDragging] = useState<number | null>(null);
@@ -157,12 +160,21 @@ export function JournalEditor(p: Props) {
       } catch {}
     }
   };
+  const priceChange = (value: string, personal=false) => {
+    personal?setPersonalInput(value):setAmountInput(value);
+    try {
+      const current=latest.current.entry.expense || {id:journalId(),bill_id:latest.current.entry.id,role:latest.current.entry.parent_id?'independent' as const:'bill' as const,currency:'CNY' as const,amount_minor:null,personal_minor:null};
+      update({expense:{...current,[personal?'personal_minor':'amount_minor']:minorAmount(value)}});
+      setError('');
+    }catch(e){setError((e as Error).message);}
+  };
   const publish = async () => {
     if (busy.current || importing || failures.length) return;
     busy.current = true;
     setPublishing(true);
     setError("");
     try {
+      minorAmount(amountInput);minorAmount(personalInput);
       validateJournal(latest.current.entry);
       await flush();
       paused.current = true;
@@ -317,6 +329,7 @@ export function JournalEditor(p: Props) {
             aria-label="手帐标题（选填）"
             placeholder="添加标题（选填）"
             maxLength={100}
+            autoFocus={!!e.parent_id && !draft.base_version}
             value={e.title}
             onChange={(ev) => update({ title: ev.target.value })}
           />
@@ -327,7 +340,7 @@ export function JournalEditor(p: Props) {
             maxLength={20000}
             value={e.description}
             onChange={(ev) => update({ description: ev.target.value })}
-            autoFocus
+            autoFocus={!e.parent_id}
           />
           <div className="j-photo-actions">
             <button
@@ -413,6 +426,14 @@ export function JournalEditor(p: Props) {
               长按照片可调整顺序，也可用箭头移动。
             </small>
           )}
+          <div className="j-tag-shortcuts" aria-label="常用事件标签">{['美食','旅行','购物','交通','日常'].map(tag=><button key={tag} aria-pressed={e.tags.includes(tag)} onClick={()=>update({tags:e.tags.includes(tag)?e.tags.filter(t=>t!==tag):[...e.tags,tag]})}>{tag}</button>)}</div>
+          {(e.expense || e.tags.some(t=>/美食|购物|交通|住宿|消费/.test(t))) && <fieldset className="j-expense-box"><legend>这次消费 · 可留空</legend>
+            <div className="j-inline"><label className="j-label">{e.expense?.role==='item'?'明细价格':'账单 / 消费金额'}<input aria-label="消费金额" inputMode="decimal" placeholder="未知可留空，免费填 0" value={amountInput} onChange={ev=>priceChange(ev.target.value)}/></label>
+            <label className="j-label">我实际支付<input aria-label="个人支付金额" inputMode="decimal" placeholder="选填" value={personalInput} onChange={ev=>priceChange(ev.target.value,true)}/></label></div>
+            {e.expense && <div className="j-inline"><select aria-label="消费币种" value={e.expense.currency} onChange={ev=>update({expense:{...e.expense!,currency:ev.target.value as any}})}>{['CNY','USD','EUR','JPY','HKD'].map(v=><option key={v}>{v}</option>)}</select><select aria-label="消费统计口径" value={e.expense.role} onChange={ev=>update({expense:{...e.expense!,role:ev.target.value as any,bill_id:ev.target.value==='item'?e.expense!.bill_id:e.id}})}><option value="bill">账单总额</option><option value="item">账单中的明细</option><option value="independent">独立消费</option></select></div>}
+            <small>总账单与其中明细分别保存，同一账单不重复相加。</small>
+          </fieldset>}
+          {!e.expense&&!e.tags.some(t=>/美食|购物|交通|住宿|消费/.test(t)) && <button className="j-text" onClick={()=>update({expense:{id:journalId(),bill_id:e.id,role:'independent',currency:'CNY',amount_minor:null,personal_minor:null}})}>＋ 记录消费</button>}
           <label className="j-label">
             当时的感受
             <textarea
@@ -499,6 +520,7 @@ export function JournalEditor(p: Props) {
                   onChange={(ev) => update({ location_text: ev.target.value })}
                 />
               </label>
+              <label className="j-label">地点分享链接<input aria-label="地点分享链接" placeholder="粘贴高德 / 美团 / 口碑链接（选填）" value={e.place_url || ''} onChange={ev=>update({place_url:ev.target.value || null})}/></label>
               <div className="j-label">
                 这次体验
                 <div className="j-stars">

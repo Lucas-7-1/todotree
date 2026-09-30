@@ -25,6 +25,7 @@ export function buildTransitionEvents(before: TaskNode[], after: TaskNode[], ope
       after_value: { status: task.status, completed_at: task.completed_at },
       title: task.title, outcome_note: task.outcome_note || '',
       path_ids_at_completion: ancestors.map(t => t.id), path_titles_at_completion: ancestors.map(t => t.title),
+      health_occurrence_id: task.health_occurrence_id,
       is_leaf_at_completion: !parents.has(task.id), recurrence_rule_id: task.recurrence_rule_id || null,
       occurrence_key: task.recurrence_period_key || null,
     });
