@@ -36,6 +36,8 @@ export function WorkoutRunner(p: {
     [permissions, setPermissions] = useState<{
       granted: boolean;
       exact: boolean;
+      countdown?: boolean;
+      rest_channel?: boolean;
     } | null>(null);
   const lock = useRef(false),
     expired = useRef(""),
@@ -136,6 +138,7 @@ export function WorkoutRunner(p: {
         left = restRemaining(s.rest!, clock);
       setRemaining(left);
       if (
+        !document.hidden &&
         left <= 0 &&
         !s.rest!.paused &&
         s.rest!.boot === clock.boot &&
@@ -146,8 +149,10 @@ export function WorkoutRunner(p: {
       }
     };
     tick();
-    const id = setInterval(tick, 250);
-    return () => clearInterval(id);
+    let id: ReturnType<typeof setInterval> | undefined;
+    const visible = () => { if(id)clearInterval(id); id=undefined; if(!document.hidden){tick();id=setInterval(tick,250);} };
+    visible(); document.addEventListener('visibilitychange',visible);
+    return () => {if(id)clearInterval(id);document.removeEventListener('visibilitychange',visible);};
   }, [p.record.version]);
   useEffect(() => {
     setRestSeconds(String(e.rest_seconds));
@@ -260,13 +265,11 @@ export function WorkoutRunner(p: {
                 {isAndroid() && (
                   <div className="h-reminder-note">
                     <p>
-                      {permissions?.granted
-                        ? permissions.exact
-                          ? "通知与准时权限已开启；锁屏效果请实机核对"
-                          : "通知可用，锁屏提醒可能延迟"
-                        : "通知未授权；应用内计时正常"}
+                      {permissions?.granted && permissions.rest_channel !== false
+                        ? permissions.countdown ? "原生休息计时运行中，可锁屏；到时提醒进入下一组准备" : s.rest?.paused ? "休息计时已暂停" : "正在设置原生计时，请检查通知栏"
+                        : "训练通知未开启；应用内计时可用"}
                     </p>
-                    <p>短时间内连续组间休息可能受系统后台限制；需要稳定计时可打开系统计时器，并在系统页面确认。</p>
+                    <p>前台计时仅在休息时运行。手机品牌的后台限制仍需实机核对；系统计时器由系统单独管理。</p>
                     {!permissions?.granted && (
                       <button
                         onClick={() =>
@@ -276,17 +279,6 @@ export function WorkoutRunner(p: {
                         }
                       >
                         开启休息通知
-                      </button>
-                    )}
-                    {permissions?.granted && !permissions.exact && (
-                      <button
-                        onClick={() =>
-                          void HealthNative.exactSettings().catch((e) =>
-                            setError(e.message),
-                          )
-                        }
-                      >
-                        设置准时提醒
                       </button>
                     )}
                     <button

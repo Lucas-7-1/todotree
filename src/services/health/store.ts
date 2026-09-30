@@ -30,8 +30,8 @@ interface NativeHealth {
     changes: HealthEntity[];
   }): Promise<HealthAck>;
   clock(): Promise<HealthClock>;
-  notificationStatus(): Promise<{ granted: boolean; exact: boolean }>;
-  requestNotifications(): Promise<{ granted: boolean; exact: boolean }>;
+  notificationStatus(): Promise<{ granted: boolean; exact: boolean; countdown?: boolean; rest_channel?: boolean }>;
+  requestNotifications(): Promise<{ granted: boolean; exact: boolean; countdown?: boolean; rest_channel?: boolean }>;
   exactSettings(): Promise<void>;
   openTimer(o: { seconds: number }): Promise<void>;
 }
@@ -241,7 +241,7 @@ export async function exportHealth() {
   return JSON.stringify(
     {
       format: "todotree-health",
-      schema_version: 1,
+      schema_version: 2,
       exported_at: new Date().toISOString(),
       records: s.records,
     },
@@ -250,7 +250,7 @@ export async function exportHealth() {
   );
 }
 export async function importHealth(value: any) {
-  if (value?.format !== "todotree-health" || value.schema_version !== 1)
+  if (value?.format !== "todotree-health" || ![1, 2].includes(value.schema_version))
     throw Error("不是健康备份文件");
   validateHealthSnapshot({ ...emptyHealth(), records: value.records });
   let added = 0,

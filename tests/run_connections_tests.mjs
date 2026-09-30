@@ -7,18 +7,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 const dir=path.resolve('node_modules/.cache/connection-tests');await mkdir(dir,{recursive:true});
-await writeFile(path.join(dir,'entry.ts'),['health/food','connections/places','connections/sharing','connections/store','connections/reminders','taskLifecycle','navigationGuard'].map(p=>`export * from ${JSON.stringify(path.resolve('src/services',p))};`).join('\n'));
+await writeFile(path.join(dir,'entry.ts'),['health/model','health/food','connections/places','connections/sharing','connections/store','connections/reminders','taskLifecycle','navigationGuard'].map(p=>`export * from ${JSON.stringify(path.resolve('src/services',p))};`).join('\n'));
 await build({entryPoints:[path.join(dir,'entry.ts')],outfile:path.join(dir,'connections.cjs'),bundle:true,format:'cjs',platform:'node',logLevel:'silent'});
 const require=createRequire(import.meta.url),api=require(path.join(dir,'connections.cjs'));
 const food=p=>api.parsePackagedFood({code:'6901234567890',product:{code:'6901234567890',product_name:'包装食品',...p}})[0];
-test('packaged gram, millilitre and unknown labels never invent density or count unknown as zero',()=>{
- assert.equal(food({product_quantity_unit:'g',nutriments:{'energy-kcal_100g':123}}).kcal_per_100g,123);
- assert.equal(food({product_quantity_unit:'g',nutriments:{'energy-kcal_100g':0}}).kcal_per_100g,0);
- const liquid=food({product_quantity_unit:'ml',nutriments:{'energy-kcal_100g':46}});assert.equal(liquid.kcal_per_100g,null);assert.equal(liquid.label_energy.basis,'100ml');assert.match(api.nutritionLabel(liquid),/不可直接/);
- assert.equal(food({nutriments:{'energy-kcal_100g':46}}).kcal_per_100g,null);
- assert.equal(food({product_quantity_unit:'g',nutriments:{'energy-kj_100g':418.4}}).kcal_per_100g,100);
- assert.equal(food({product_quantity_unit:'g',nutriments:{'energy-kcal_100g':-1}}).kcal_per_100g,null);
+test('OFF package size never substitutes for nutrition-table basis; explicit serving and kJ remain distinct',()=>{
+ const gram=food({product_quantity_unit:'g',nutriments:{'energy-kcal_100g':123}});assert.equal(gram.kcal_per_100g,null);assert.equal(gram.label_energy.basis,'unknown');assert.equal(gram.label_energy.kcal,123);
+ const liquid=food({product_quantity_unit:'ml',nutriments:{'energy-kcal_100g':46}});assert.equal(liquid.kcal_per_100g,null);assert.equal(liquid.label_energy.basis,'unknown');
+ const explicit=food({nutrition_data_per:'100ml',nutriments:{'energy-kcal_100g':46}});assert.equal(explicit.label_energy.basis,'100ml');assert.equal(api.intakeKcal(explicit,null,{amount:250,unit:'ml'}),115);assert.equal(api.intakeKcal(explicit,250),null);
+ assert.equal(food({nutriments:{'energy-kj_100g':418.4}}).label_energy.kcal,100);
+ assert.equal(food({nutriments:{'energy-kcal_100g':0}}).label_energy.kcal,0);assert.equal(food({nutriments:{'energy-kcal_100g':-1}}).label_energy.kcal,null);
+ const serving=food({nutrition_data_per:'serving',nutriments:{'energy-kcal_100g':46,'energy-kcal_serving':92}});assert.equal(api.intakeKcal(serving,null,{amount:2,unit:'serving'}),184);assert.equal(api.intakeKcal(serving,100),null);
  assert.deepEqual(api.parsePackagedFood({product:{code:'bad',product_name:'unknown'}}),[]);
+});
+const snapshot=(name,kcal)=>({id:name,name,state:'raw',kcal_per_100g:kcal,source:'fixture',source_url:null,source_id:null,captured_at:new Date().toISOString(),data_type:'fixture'});
+test('portion calculations require an explicit serving mapping and never invent density',()=>{
+ const f=snapshot('food',150);assert.equal(api.intakeKcal(f,null,{amount:2,unit:'serving'}),null);f.serving={label:'包装一份',grams:40,millilitres:null};assert.equal(api.intakeKcal(f,null,{amount:2,unit:'serving'}),120);assert.equal(api.intakeKcal(f,null,{amount:80,unit:'ml'}),null);
+ assert.equal(api.quantityLabel({quantity:{amount:2,unit:'serving'},grams:null}),'2 份');assert.equal(api.intakeKcal({...f,kcal_per_100g:0},50),0);
+ assert.throws(()=>api.validateFood({...f,label_energy:{kcal:50,basis:'100ml'}}));assert.throws(()=>api.validateQuantity({amount:-1,unit:'g'}));
+});
+test('recipes snapshot ingredients, oil and real yield; partial ingredients keep total unknown',()=>{
+ const rice=snapshot('rice cooked',130),oil=snapshot('oil',884);
+ const recipe=api.recipeFood('炒饭',[{food:rice,quantity:{amount:200,unit:'g'}},{food:oil,quantity:{amount:10,unit:'g'}}],250,'g');assert.equal(recipe.kcal_per_100g,139.36);assert.equal(api.intakeKcal(recipe,125),174.2);rice.kcal_per_100g=999;assert.equal(recipe.recipe.ingredients[0].food.kcal_per_100g,130);assert.equal(recipe.recipe.complete,true);
+ const partial=api.recipeFood('部分配方',[{food:snapshot('unknown',null),quantity:{amount:20,unit:'g'}}],100,'g');assert.equal(partial.kcal_per_100g,null);assert.equal(partial.recipe.complete,false);
+ const soup=api.recipeFood('汤',[{food:oil,quantity:{amount:10,unit:'g'}}],500,'ml');assert.equal(soup.kcal_per_100g,null);assert.equal(api.intakeKcal(soup,null,{amount:250,unit:'ml'}),44.2);
+ assert.throws(()=>api.recipeFood('wrong',[],0,'g'));const tampered=structuredClone(recipe);tampered.recipe.yield.amount=100;assert.throws(()=>api.validateFood(tampered));
+});
+test('offline USDA entries keep official FDC identities, raw/cooked descriptions and source version',()=>{
+ const eggs=api.searchLocalFoods('鸡蛋');assert.ok(eggs.length);const raw=eggs.find(f=>f.source_id==='171287');assert.ok(raw);assert.equal(raw.kcal_per_100g,143);assert.match(raw.source_url,/171287/);assert.equal(raw.source_version,'2018-04');
+ assert.ok(api.searchLocalFoods('米饭').every(f=>/cooked/i.test(f.state)));assert.ok(api.searchLocalFoods('生菜').length);assert.equal(api.searchLocalFoods('no-food-like-this').length,0);
 });
 test('nutrition snapshots and personal-label backup preserve provenance, zero and unknown without credentials',()=>{
  const state=api.defaultConnections();state.secrets.amap_key='not-a-live-map-key';state.secrets.feishu_secret='not-a-live-secret';state.settings.feishu_verified=true;state.settings.feishu_enabled=true;state.settings.foods=[food({product_quantity_unit:'g',nutriments:{'energy-kcal_100g':0}})];

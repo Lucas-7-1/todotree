@@ -131,6 +131,7 @@ public class NativeWorkspacePlugin extends Plugin {
                 String sealed=encrypt(secret);
                 Set<String> reminderIds=new HashSet<>();
                 db.beginTransaction();
+                TaskReminderQueue.ensure(db);
                 for(int i=0;i<changes.length();i++) {
                     JSONObject row=changes.getJSONObject(i); String collection=row.getString("collection"),id=row.getString("id");
                     if(!COLLECTIONS.contains(collection) || id.isEmpty()) throw new Exception("非法记录类型");
@@ -145,12 +146,13 @@ public class NativeWorkspacePlugin extends Plugin {
                         db.insertWithOnConflict("records",null,v,SQLiteDatabase.CONFLICT_REPLACE);
                     }
                 }
+                for(String reminderId:reminderIds)TaskReminderQueue.enqueue(db,reminderId,revision+1);
                 put(db,"settings",call.getObject("settings",new JSObject()).toString()); put(db,"ai_settings",ai.toString()); put(db,"api_key",sealed);
                 put(db,"revision",String.valueOf(revision+1)); put(db,"operation_id",op); put(db,"saved_at",now());
                 db.setTransactionSuccessful(); db.endTransaction();
                 JSObject committed=ack(db);
-                try { for(int i=0;i<changes.length();i++) {JSONObject row=changes.getJSONObject(i);if("tasks".equals(row.optString("collection"))&&reminderIds.contains(row.optString("id"))) {if(row.isNull("value"))TaskReminderReceiver.cancel(getContext(),row.getString("id"));else TaskReminderReceiver.schedule(getContext(),new JSONObject(row.getString("value")));}} }
-                catch(Exception reminder) {committed.put("reminder_error","任务已保存，系统提醒未设置成功，请打开任务重新检查");}
+                try { if(TaskReminderQueue.drain(getContext())>0)committed.put("reminder_error","任务已保存，部分提醒等待重新设置；下次启动会核对"); }
+                catch(Exception reminder) {committed.put("reminder_error","任务已保存，系统提醒待重新设置，请重新打开核对");}
                 call.resolve(committed);
             } catch(Exception e) {
                 if(db!=null && db.inTransaction()) db.endTransaction();
@@ -235,7 +237,7 @@ public class NativeWorkspacePlugin extends Plugin {
                 if(request.cancelled) throw new IOException("Cancelled");
                 HttpURLConnection c=(HttpURLConnection)url.openConnection(); request.connection=c;
                 c.setInstanceFollowRedirects(false); // Do not forward credentials to redirect targets.
-                c.setConnectTimeout(15000); c.setReadTimeout(Math.min(90000,Math.max(1000,call.getInt("timeout",90000))));
+                c.setConnectTimeout(Math.min(15000,Math.max(1000,call.getInt("timeout",90000)))); c.setReadTimeout(Math.min(90000,Math.max(1000,call.getInt("timeout",90000))));
                 c.setRequestMethod(call.getString("method","GET"));
                 JSONObject headers=call.getObject("headers",new JSObject());
                 Iterator<String> names=headers.keys(); while(names.hasNext()) { String name=names.next(); c.setRequestProperty(name,headers.getString(name)); }
@@ -243,9 +245,10 @@ public class NativeWorkspacePlugin extends Plugin {
                 if(request.cancelled) throw new IOException("Cancelled");
                 if(body!=null) { c.setDoOutput(true);try(OutputStream out=c.getOutputStream()){out.write(body.getBytes(StandardCharsets.UTF_8));} }
                 int status=c.getResponseCode(); InputStream source=status>=400?c.getErrorStream():c.getInputStream();
+                int responseLimit=Math.max(1024,Math.min(LIMIT,call.getInt("max_bytes",LIMIT)));
                 ByteArrayOutputStream bytes=new ByteArrayOutputStream();
-                if(source!=null) try(InputStream in=source) { byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1) { if(request.cancelled || bytes.size()+n>LIMIT) throw new IOException();bytes.write(buffer,0,n); } }
-                JSObject response=new JSObject();response.put("status",status);response.put("body",bytes.toString("UTF-8"));call.resolve(response);
+                if(source!=null) try(InputStream in=source) { byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1) { if(request.cancelled || bytes.size()+n>responseLimit) throw new IOException();bytes.write(buffer,0,n); } }
+                JSObject response=new JSObject();response.put("status",status);response.put("body",bytes.toString("UTF-8"));JSObject responseHeaders=new JSObject();for(String header:new String[]{"Content-Type","Retry-After","Content-Length"}){String value=c.getHeaderField(header);if(value!=null)responseHeaders.put(header,value);}response.put("headers",responseHeaders);call.resolve(response);
             } catch(Exception e) { call.reject(request.cancelled?"请求已取消":"模型网络请求失败，请检查网络和接口地址","HTTP_FAILED"); }
             finally { if(request.connection!=null) request.connection.disconnect();requests.remove(id); }
         });

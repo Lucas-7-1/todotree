@@ -31,3 +31,7 @@
 .settings-tabs{overflow-x:auto;max-width:100%;scrollbar-width:none}.settings-tabs button{flex-shrink:0}.settings-tabs::-webkit-scrollbar{display:none}
 .settings-overlay .connection-body{padding:0;overflow:visible}
 .connection-hint,.connection-notice,.connection-error{overflow-wrap:anywhere}
+
+.connection-preview{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:.85rem;background:#f4f6fa;padding:12px;border-radius:12px}.h-recipe-row{padding:10px 0;border-bottom:1px solid #ddd}.h-recipe-row small{display:block;overflow-wrap:anywhere}
+
+.connection-body label.connection-check,.reminder-card label.connection-check{flex-direction:row;align-items:flex-start;gap:8px}

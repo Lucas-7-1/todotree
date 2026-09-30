@@ -29,6 +29,7 @@ import {
   healthId,
   dailyWeights,
   sleepDuration,
+  quantityLabel,
 } from "../../services/health/model";
 import {
   commitHealth,
@@ -279,7 +280,7 @@ export default function HealthApp(p: {
           : `${e.body.snapshot.title} · ${e.body.logs.length}组 / ${e.body.logs.reduce((n: number, l: any) => n + l.actual, 0)}次`;
   const recordSub = (e: HealthEntity) =>
     e.kind === "intake"
-      ? `${e.body.grams === null ? "克重未填" : e.body.grams + " g"} · ${e.body.kcal === null ? "热量未知" : e.body.kcal + " kcal"}`
+      ? `${quantityLabel(e.body)} · ${e.body.kcal === null ? "热量未知" : e.body.kcal + " kcal"}`
       : e.kind === "sleep"
         ? `手动记录 · ${((Date.parse(e.body.end) - Date.parse(e.body.start)) / 3600000).toFixed(1)}小时`
         : `${e.day} · 已确认记录`;

@@ -8,12 +8,12 @@ export interface NativeStore {
   commit(options: { expected_revision: number; operation_id: string; changes: NativeDelta[]; settings: object; ai_settings: object; checkpoint: boolean }): Promise<{ revision: number; operation_id: string; saved_at: string; reminder_error?: string }>;
   exportFile(options: { content: string; filename: string; mimeType?: string }): Promise<{ cancelled?: boolean; verified?: boolean; byte_count?: number }>;
   importFile(): Promise<{ cancelled?: boolean; content?: string; byte_count?: number }>;
-  http(options: { id: string; url: string; method: string; headers: Record<string,string>; body?: string; timeout: number }): Promise<{ status: number; body: string }>;
+  http(options: { id: string; url: string; method: string; headers: Record<string,string>; body?: string; timeout: number; max_bytes?:number }): Promise<{ status: number; body: string; headers?:Record<string,string> }>;
   cancelHttp(options: { id: string }): Promise<void>;
 }
 export const NativeWorkspace = registerPlugin<NativeStore>('NativeWorkspace');
 /** Native HTTP avoids browser CORS; cancellation disconnects the underlying request. */
-export async function apiFetch(url: string, init: RequestInit): Promise<Response> {
+export async function apiFetch(url: string, init: RequestInit & {responseLimit?:number;timeoutMs?:number}): Promise<Response> {
   if (!isAndroid()) return fetch(url, init);
   if (new URL(url).protocol !== 'https:') throw new Error('手机版模型接口必须使用 HTTPS');
   const id = crypto.randomUUID();
@@ -21,8 +21,8 @@ export async function apiFetch(url: string, init: RequestInit): Promise<Response
   if (init.signal?.aborted) throw new DOMException('已取消', 'AbortError');
   init.signal?.addEventListener('abort', abort, { once: true });
   try {
-    const result = await NativeWorkspace.http({ id, url, method: init.method || 'GET', headers: Object.fromEntries(new Headers(init.headers).entries()), body: init.body as string | undefined, timeout: 90000 });
+    const result = await NativeWorkspace.http({ id, url, method: init.method || 'GET', headers: Object.fromEntries(new Headers(init.headers).entries()), body: init.body as string | undefined, timeout: init.timeoutMs||90000,max_bytes:init.responseLimit });
     if (init.signal?.aborted) throw new DOMException('已取消', 'AbortError');
-    return new Response(result.body, { status: result.status });
+    return new Response(result.body, { status: result.status, headers:result.headers });
   } finally { init.signal?.removeEventListener('abort', abort); }
 }

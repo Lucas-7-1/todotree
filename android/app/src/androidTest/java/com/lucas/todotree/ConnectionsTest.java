@@ -38,6 +38,15 @@ public class ConnectionsTest {
     }
     try(IntegrationStore reopened=new IntegrationStore(c)){assertEquals("贵阳",reopened.snapshot().getJSONObject("settings").getString("city"));assertEquals("native-fixture-secret",reopened.snapshot().getJSONObject("secrets").getString("amap_key"));assertFalse(reopened.claim("a:v1:local","a","local"));assertTrue(reopened.claim("a:v2:local","a","local"));}
   }
+  @Test public void boundedSnoozesAndKnownRejectionRetryAreDurableAndClaimedOnce() throws Exception{
+    Context c=isolated("delivery-queue-test-");c.getDatabasePath("integrations.db").delete();
+    try(IntegrationStore s=new IntegrationStore(c)){
+      assertEquals(1,s.snooze("a","v1",1000).getInt("sequence"));assertEquals(2,s.snooze("a","v1",2000).getInt("sequence"));assertEquals(3,s.snooze("a","v1",3000).getInt("sequence"));
+      try{s.snooze("a","v1",4000);fail("must cap snooze");}catch(IllegalStateException expected){}assertEquals(3,s.snooze("a").getInt("sequence"));assertEquals(1,s.snooze("a","v2",5000).getInt("sequence"));
+      assertTrue(s.claim("a:v1:feishu","a","feishu"));s.retryLater("a:v1:feishu","a","v1",1000);assertNotNull(s.retry("a"));assertTrue(s.claimRetry("a:v1:feishu"));assertFalse(s.claimRetry("a:v1:feishu"));assertNull(s.retry("a"));s.receipt("a:v1:feishu","unknown","结果未知");assertFalse(s.claimRetry("a:v1:feishu"));
+    }
+    try(IntegrationStore reopened=new IntegrationStore(c)){assertEquals("v2",reopened.snooze("a").getString("revision"));reopened.clearSnooze("a");assertNull(reopened.snooze("a"));}
+  }
   private JSONObject reminder(String version,long when) throws Exception {return new JSONObject().put("enabled",true).put("trigger_at",Instant.ofEpochMilli(when).toString()).put("timezone","Asia/Shanghai").put("revision",version).put("exact",false).put("hide_title",true).put("channels",new JSONArray().put("local"));}
   private JSONObject task(String id,String version,long when) throws Exception {return new JSONObject().put("id",id).put("title","原生提醒测试").put("parent_id",JSONObject.NULL).put("status","open").put("deleted_at",JSONObject.NULL).put("archived_at",JSONObject.NULL).put("reminder",reminder(version,when));}
   private void commit(NativeWorkspacePlugin plugin,JSONObject row) throws Exception {

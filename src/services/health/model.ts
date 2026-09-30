@@ -87,6 +87,7 @@ export interface WorkoutSession {
   close_task: boolean;
   clock_warning?: boolean;
 }
+export interface FoodQuantity { amount: number | null; unit: 'g' | 'ml' | 'serving' }
 export interface FoodSnapshot {
   id: string;
   name: string;
@@ -97,16 +98,20 @@ export interface FoodSnapshot {
   source_id: string | null;
   captured_at: string;
   data_type: string;
-  provider?: 'usda' | 'off' | 'manual';
+  provider?: 'usda' | 'off' | 'manual' | 'recipe';
+  source_version?: string;
   brand?: string;
   barcode?: string;
-  label_energy?: { kcal: number | null; basis: '100g' | '100ml' | 'unknown' };
+  label_energy?: { kcal: number | null; basis: '100g' | '100ml' | 'serving' | 'unknown' };
+  serving?: { label: string; grams: number | null; millilitres: number | null };
+  recipe?: { ingredients: { food: FoodSnapshot; quantity: FoodQuantity; kcal: number | null }[]; yield: { amount: number; unit: 'g' | 'ml' }; complete: boolean };
   license_url?: string;
 }
 export interface IntakeRecord {
   meal: string;
   food: FoodSnapshot;
   grams: number | null;
+  quantity?: FoodQuantity;
   kcal: number | null;
   occurred_at: string;
   note: string;
@@ -234,6 +239,11 @@ export function validateHealthRecord(e: HealthEntity) {
   )
     throw Error("结束时间须晚于开始时间，可记录跨夜睡眠");
   if (e.kind === "intake") {
+    validateFood(b.food);
+    if (b.quantity) {
+      validateQuantity(b.quantity);
+      if (b.grams !== (b.quantity.unit === 'g' ? b.quantity.amount : null)) throw Error('摄入单位与保存的克重不一致');
+    }
     if (
       !b.food?.name?.trim() ||
       (b.grams !== null && (!Number.isFinite(b.grams) || b.grams <= 0))
@@ -244,7 +254,7 @@ export function validateHealthRecord(e: HealthEntity) {
       (!Number.isFinite(b.food.kcal_per_100g) || b.food.kcal_per_100g < 0)
     )
       throw Error("每 100g 能量无效");
-    if (b.kcal !== intakeKcal(b.food, b.grams))
+    if (b.kcal !== intakeKcal(b.food, b.grams, b.quantity))
       throw Error("摄入热量与保存的营养快照不一致");
     if (
       !Number.isFinite(Date.parse(b.occurred_at)) ||
@@ -383,10 +393,51 @@ export function validateHealthSnapshot(s: HealthSnapshot) {
     validateHealthRecord(e);
   }
 }
-export function intakeKcal(food: FoodSnapshot, grams: number | null) {
-  return food.kcal_per_100g === null || grams === null
-    ? null
-    : Math.round(food.kcal_per_100g * grams) / 100;
+export function validateQuantity(q: FoodQuantity) {
+  if (!q || !['g', 'ml', 'serving'].includes(q.unit) || (q.amount !== null && (!Number.isFinite(q.amount) || q.amount <= 0))) throw Error('实际份量无效，未知可留空');
+}
+export function validateFood(food: FoodSnapshot, depth = 0) {
+  if (!food || typeof food.name !== 'string' || !food.name.trim() || food.name.length > 300 || (food.kcal_per_100g !== null && (!Number.isFinite(food.kcal_per_100g) || food.kcal_per_100g < 0 || food.kcal_per_100g > 10000))) throw Error('食品营养快照无效');
+  const label = food.label_energy;
+  if (label && (!['100g', '100ml', 'serving', 'unknown'].includes(label.basis) || (label.kcal !== null && (!Number.isFinite(label.kcal) || label.kcal < 0)))) throw Error('营养标签单位无效');
+  if (label?.basis === '100g' && label.kcal !== food.kcal_per_100g) throw Error('每 100g 营养数据不一致');
+  if (label && label.basis !== '100g' && food.kcal_per_100g !== null) throw Error('不同营养单位不能混用');
+  if (food.serving && (typeof food.serving.label !== 'string' || food.serving.label.length > 100 || [food.serving.grams, food.serving.millilitres].some(v => v !== null && (!Number.isFinite(v) || v <= 0)))) throw Error('每份的实测重量或体积无效');
+  if (food.recipe) {
+    const recipe = food.recipe;
+    if (depth > 2 || !Array.isArray(recipe.ingredients) || !recipe.ingredients.length || recipe.ingredients.length > 30 || !['g', 'ml'].includes(recipe.yield?.unit) || !Number.isFinite(recipe.yield.amount) || recipe.yield.amount <= 0) throw Error('配方原料或实际成品量无效');
+    let total = 0, complete = true;
+    for (const item of recipe.ingredients) {
+      validateFood(item.food, depth + 1); validateQuantity(item.quantity);
+      const kcal = intakeKcal(item.food, null, item.quantity);
+      if (kcal !== item.kcal) throw Error('配方原料与营养快照不一致');
+      if (kcal === null) complete = false; else total += kcal;
+    }
+    const rate = complete ? Math.round(total / recipe.yield.amount * 10000) / 100 : null;
+    if (recipe.complete !== complete || label?.basis !== ('100' + recipe.yield.unit) || label.kcal !== rate) throw Error('配方估算与实际成品量不一致');
+  }
+}
+export function intakeKcal(food: FoodSnapshot, grams: number | null, quantity?: FoodQuantity) {
+  const q = quantity || { amount: grams, unit: 'g' as const };
+  if (q.amount === null || !Number.isFinite(q.amount) || q.amount <= 0) return null;
+  const label = food.label_energy || { kcal: food.kcal_per_100g, basis: '100g' };
+  if (label.kcal === null || label.kcal === undefined || label.basis === 'unknown') return null;
+  let amount: number | null = null;
+  if (label.basis === '100g') amount = q.unit === 'g' ? q.amount : q.unit === 'serving' && food.serving?.grams ? q.amount * food.serving.grams : null;
+  if (label.basis === '100ml') amount = q.unit === 'ml' ? q.amount : q.unit === 'serving' && food.serving?.millilitres ? q.amount * food.serving.millilitres : null;
+  if (label.basis === 'serving') amount = q.unit === 'serving' ? q.amount : q.unit === 'g' && food.serving?.grams ? q.amount / food.serving.grams : q.unit === 'ml' && food.serving?.millilitres ? q.amount / food.serving.millilitres : null;
+  return amount === null ? null : Math.round(label.kcal * amount * (label.basis === 'serving' ? 100 : 1)) / 100;
+}
+export function quantityLabel(record: IntakeRecord) {
+  const q = record.quantity || { amount: record.grams, unit: 'g' };
+  return q.amount === null ? '份量未填' : `${q.amount} ${q.unit === 'serving' ? '份' : q.unit}`;
+}
+export function recipeFood(name: string, ingredients: { food: FoodSnapshot; quantity: FoodQuantity }[], amount: number, unit: 'g' | 'ml'): FoodSnapshot {
+  const items = ingredients.map(item => ({ ...structuredClone(item), kcal: intakeKcal(item.food, null, item.quantity) }));
+  const complete = items.every(item => item.kcal !== null);
+  const kcal = complete ? Math.round(items.reduce((sum, item) => sum + item.kcal!, 0) / amount * 10000) / 100 : null;
+  const food: FoodSnapshot = { id: 'recipe-' + crypto.randomUUID(), name: name.trim(), state: '用户配方 · 估算', provider: 'recipe', source: '用户配方（原料快照与实际成品量）', source_url: null, source_id: null, kcal_per_100g: unit === 'g' ? kcal : null, label_energy: { kcal, basis: unit === 'g' ? '100g' : '100ml' }, captured_at: new Date().toISOString(), data_type: '配方估算', recipe: { ingredients: items, yield: { amount, unit }, complete } };
+  validateFood(food); return food;
 }
 export function previousWeight(records: HealthEntity[], before: string) {
   return (

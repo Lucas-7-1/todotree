@@ -23,7 +23,7 @@ export async function sendFeishu(state:ConnectionSnapshot,text:string,signal:Abo
   const timer=setTimeout(abort,10000);
   let rejected=false;
   try {
-    const response=await apiFetch(state.secrets.feishu_webhook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
+    const response=await apiFetch(state.secrets.feishu_webhook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal,redirect:'error',responseLimit:65536,timeoutMs:10000});
     if(!response.ok){rejected=true;throw Error('飞书明确拒绝了请求，请检查机器人权限、关键词与限流状态');}
     const result=await response.json();
     if(Number(result.code??result.StatusCode)!==0){rejected=true;throw Error('机器人未接受消息，请检查安全设置与目的地');}
@@ -33,7 +33,7 @@ export async function sendFeishu(state:ConnectionSnapshot,text:string,signal:Abo
   } finally {clearTimeout(timer);signal.removeEventListener('abort',abort);}
 }
 export function taskShareText(task:TaskNode,path='') {
-  return [task.title,path?`项目：${path}`:'',task.reminder?.trigger_at?`提醒：${new Date(task.reminder.trigger_at).toLocaleString()}`:'',task.due_date?`截止日期：${task.due_date}`:''].filter(Boolean).join('\n');
+  return [task.title,path?`项目：${path}`:'',task.reminder?.trigger_at?`提醒：${new Date(task.reminder.trigger_at).toLocaleString()}`:'',task.due_date?`截止日期：${task.due_date}`:'',`打开待办：todotree://task/${encodeURIComponent(task.id)}`].filter(Boolean).join('\n');
 }
 export async function shareTask(task:TaskNode,path:string) {
   const text=taskShareText(task,path);

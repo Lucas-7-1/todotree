@@ -1,13 +1,15 @@
 import { registerPlugin } from '@capacitor/core';
 import { isAndroid } from '../native/platform';
-import type { FoodSnapshot } from '../health/model';
+import { validateFood, type FoodSnapshot } from '../health/model';
+import { validatePlace, type PlaceReference } from './places';
 
 export interface ConnectionSettings {
-  city:string;off_enabled:boolean;foods:FoodSnapshot[];
+  city:string;off_enabled:boolean;foods:FoodSnapshot[];recent_places?:PlaceReference[];
   feishu_label:string;feishu_verified:boolean;feishu_enabled:boolean;
 }
 export interface ConnectionSecrets {amap_key:string;usda_key:string;feishu_webhook:string;feishu_secret:string;}
 export interface ConnectionSnapshot {revision:number;settings:ConnectionSettings;secrets:ConnectionSecrets;}
+export interface RestTestStatus {id:string;state:'running'|'posting'|'posted'|'confirmed'|'blocked'|'cancelled';seconds:number;started_at:number;fired_at?:number;confirmed_at?:number;}
 export interface NativeConnectionsAPI {
   read():Promise<ConnectionSnapshot>;save(options:ConnectionSnapshot):Promise<ConnectionSnapshot>;resetCredentials():Promise<ConnectionSnapshot>;
   share(options:{text:string;title:string}):Promise<void>;openCalendar(options:{title:string;start:number;end:number}):Promise<void>;
@@ -15,6 +17,8 @@ export interface NativeConnectionsAPI {
   addListener(event:'sharedText'|'openTask',handler:(payload:any)=>void):Promise<{remove:()=>Promise<void>}>;
   notificationStatus():Promise<{granted:boolean;exact:boolean;task_channel:boolean}>;requestNotifications():Promise<{granted:boolean;exact:boolean;task_channel:boolean}>;
   exactSettings():Promise<void>;testNotification():Promise<void>;
+  startRestTest(options:{seconds:number}):Promise<void>;restTestStatus():Promise<{test:RestTestStatus|null}>;confirmRestTest(options:{id:string}):Promise<{test:RestTestStatus|null}>;stopRestTest():Promise<void>;notificationSettings():Promise<void>;
+  locate():Promise<{longitude:number;latitude:number}>;cancelLocation():Promise<void>;
   taskDelivery(options:{task_id:string}):Promise<{rows:{channel:string;status:string;message:string;at:number}[]}>;
 }
 export const NativeConnections=registerPlugin<NativeConnectionsAPI>('Connections');
@@ -29,10 +33,11 @@ export function validateConnections(s:ConnectionSnapshot) {
   const p=s.settings;
   if(!text(p.city,100)||!text(p.feishu_label,100)||typeof p.off_enabled!=='boolean'||typeof p.feishu_verified!=='boolean'||typeof p.feishu_enabled!=='boolean'||!Array.isArray(p.foods)||p.foods.length>200)throw Error('连接配置格式无效');
   for(const k of ['amap_key','usda_key','feishu_webhook','feishu_secret'] as const)if(!text(s.secrets[k],4000))throw Error('凭证格式无效');
+  if(p.recent_places){if(!Array.isArray(p.recent_places)||p.recent_places.length>20)throw Error('最近地点过多');p.recent_places.forEach(validatePlace);}
   const ids=new Set<string>();
   for(const f of p.foods) {
     if(!f||!text(f.id,150)||!f.id||ids.has(f.id)||!text(f.name,300)||!f.name.trim()||!text(f.state,1000)||!text(f.source,300)||!text(f.data_type,200)||typeof f.captured_at!=='string'||!Number.isFinite(Date.parse(f.captured_at))||(f.kcal_per_100g!==null&&(!Number.isFinite(f.kcal_per_100g)||f.kcal_per_100g<0||f.kcal_per_100g>10000))||(f.source_url!==null&&(!text(f.source_url,2000)||!/^https?:\/\//i.test(f.source_url))))throw Error('个人营养标签格式无效');
-    if(f.label_energy&&(!['100g','100ml','unknown'].includes(f.label_energy.basis)||(f.label_energy.kcal!==null&&(!Number.isFinite(f.label_energy.kcal)||f.label_energy.kcal<0))))throw Error('营养标签单位无效');
+    validateFood(f);
     ids.add(f.id);
   }
 }
@@ -62,5 +67,7 @@ export function saveConnections(value:ConnectionSnapshot):Promise<ConnectionSnap
 export function invalidateConnections(){pending=null;}
 if(typeof window!=='undefined')window.addEventListener('storage',e=>{if(e.key===PUBLIC){pending=null;window.dispatchEvent(new Event('todotree:connections'));}});
 export async function rememberFood(food:FoodSnapshot){const s=await loadConnections();s.settings.foods=[structuredClone(food),...s.settings.foods.filter(f=>f.id!==food.id)].slice(0,200);return saveConnections(s);}
-export function connectionBackup(s:ConnectionSnapshot){validateConnections(s);const p=s.settings;return {format:'todotree-connections',schema_version:1,exported_at:new Date().toISOString(),settings:{city:p.city,off_enabled:p.off_enabled,foods:structuredClone(p.foods),feishu_label:p.feishu_label,feishu_verified:false,feishu_enabled:false}};}
-export async function restoreConnectionBackup(value:any){if(value?.format!=='todotree-connections'||value.schema_version!==1||!value.settings)throw Error('这不是连接配置备份，请选择对应的个人标签文件');const current=await loadConnections();const clean=connectionBackup({...current,settings:value.settings}).settings;return saveConnections({...current,settings:clean});}
+export function connectionBackup(s:ConnectionSnapshot){validateConnections(s);const p=s.settings;return {format:'todotree-connections',schema_version:2,exported_at:new Date().toISOString(),settings:{city:p.city,off_enabled:p.off_enabled,foods:structuredClone(p.foods),recent_places:structuredClone(p.recent_places||[]),feishu_label:p.feishu_label,feishu_verified:false,feishu_enabled:false}};}
+export async function restoreConnectionBackup(value:any){if(value?.format!=='todotree-connections'||![1,2].includes(value.schema_version)||!value.settings)throw Error('这不是连接配置备份，请选择对应的个人标签文件');const current=await loadConnections();const clean=connectionBackup({...current,settings:value.settings}).settings;return saveConnections({...current,settings:clean});}
+
+export async function rememberPlace(place:PlaceReference){validatePlace(place);const s=await loadConnections();const identity=(p:PlaceReference)=>p.provider+':'+(p.source_id||p.source_url||p.name+'|'+p.address);s.settings.recent_places=[structuredClone(place),...(s.settings.recent_places||[]).filter(p=>identity(p)!==identity(place))].slice(0,20);return saveConnections(s);}
