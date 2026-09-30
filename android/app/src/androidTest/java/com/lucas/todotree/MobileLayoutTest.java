@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 import org.junit.Test;
+import org.junit.Before;
 import org.junit.runner.RunWith;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -19,6 +20,12 @@ import java.util.concurrent.TimeUnit;
 /** Runs the real WebView: checks system insets, overflow, tabs and fixed panels. */
 @RunWith(AndroidJUnit4.class)
 public class MobileLayoutTest {
+    @Before public void clearEmulatorLauncherBeforeUiScenario() throws Exception {
+        // A cold API 36 emulator can leave a Quickstep ANR dialog over the app.
+        // Clear only the test device launcher; never dismiss or hide TodoTree ANRs.
+        shell("am force-stop com.android.launcher3");
+        shell("am force-stop com.google.android.apps.nexuslauncher");
+    }
     private JSONObject js(ActivityScenario<MainActivity> activity, String script) throws Exception {
         CompletableFuture<String> result = new CompletableFuture<>();
         activity.onActivity(a -> a.getBridge().getWebView().evaluateJavascript(
@@ -92,6 +99,10 @@ public class MobileLayoutTest {
         JSONObject field=js(activity,"const r=document.querySelector('"+selector+"').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,width:innerWidth};");
         CompletableFuture<float[]> result=new CompletableFuture<>();
         activity.onActivity(a->{android.webkit.WebView web=a.getBridge().getWebView();int[] location=new int[2];web.getLocationOnScreen(location);
+            if (!a.hasWindowFocus()) {
+                result.completeExceptionally(new AssertionError("TodoTree window is obscured; cannot inject a real touch"));
+                return;
+            }
             float scale=web.getWidth()/(float)field.optDouble("width");
             result.complete(new float[]{location[0]+(float)field.optDouble("x")*scale,location[1]+(float)field.optDouble("y")*scale});});
         return result.get(5,TimeUnit.SECONDS);

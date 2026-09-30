@@ -26,6 +26,7 @@ Exports retain schema 2 and add optional format, export-time and data SHA-256 me
 - Browser regression passed for invalid files, cancellation, retrying the same file, full restore, and the atomic pre-restore checkpoint.
 - Expense inputs were checked at 320, 360, 393, 430 and 768 CSS pixels with real Chinese fonts. Long decimal values save and reopen correctly; blank and zero remain distinct.
 - Five Android document IO instrumentation tests cover close failures, exact saved bytes, BOM decoding, invalid encoding/oversize input and protection against empty export truncating a previous file. Their execution, and the native build, are verified by the branch's Android workflow rather than claimed from browser tests.
+- Run 36698165564 built both Android variants and passed the five new document tests plus existing storage tests. Two UI tests were blocked by a captured system `Quickstep isn't responding` dialog. UI setup now clears only emulator launcher processes and checks application window focus before real touch injection; TodoTree failures remain visible. The full suite is rerun after this test environment correction.
 
 ## Native packaging
 
