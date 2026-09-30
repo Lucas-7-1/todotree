@@ -1,6 +1,7 @@
 import { isAndroid, NativeWorkspace, workspaceDelta } from './native/platform';
 import { TaskNode, AppSettings } from '../types/todo';
 import { TaskEvent, SavedReport, AISettings, AIAttempt } from '../types/ai';
+import { encodeWorkspaceBackup, verifyWorkspaceBackup } from './backupCodec';
 
 export interface WorkspaceData {
   tasks: TaskNode[];
@@ -85,7 +86,7 @@ async function readBrowser(): Promise<WorkspaceSnapshot | null> {
   } finally { db.close(); }
 }
 
-async function writeBrowser(next: WorkspaceSnapshot, expected: number): Promise<void> {
+async function writeBrowser(next: WorkspaceSnapshot, expected: number, checkpoint = false): Promise<void> {
   const db = await browserDB();
   try {
     await new Promise<void>((resolve, reject) => {
@@ -95,6 +96,11 @@ async function writeBrowser(next: WorkspaceSnapshot, expected: number): Promise<
       let conflict = false;
       req.onsuccess = () => {
         if (req.result && req.result.revision !== expected) { conflict = true; tx.abort(); return; }
+        if (checkpoint && req.result) {
+          const recovery = clone(req.result) as WorkspaceSnapshot;
+          delete recovery.data.ai_settings.api_key;
+          store.put(recovery, 'restore_checkpoint');
+        }
         store.put(next, 'workspace');
       };
       tx.oncomplete = () => resolve();
@@ -199,7 +205,7 @@ async function send(op: NonNullable<typeof failedOperation>, checkpoint = false)
   } else if (isDesktop()) next = await request('/api/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(op) });
   else {
     next = { schema_version: 2, revision: op.expected_revision + 1, operation_id: op.operation_id, saved_at: new Date().toISOString(), data: op.data };
-    await writeBrowser(next, op.expected_revision);
+    await writeBrowser(next, op.expected_revision, checkpoint);
   }
   validateWorkspace(next);
   if (next.operation_id !== op.operation_id || next.revision !== op.expected_revision + 1)
@@ -245,12 +251,18 @@ export const getRecoveryCopy = () => failedOperation ? clone(failedOperation) : 
 export async function exportFullBackup(): Promise<string> {
   await tail;
   const state = await loadWorkspace();
-  delete state.data.ai_settings.api_key;
   if (blocked) throw new Error("存在未确认保存，请先导出待恢复副本或重试，不能把旧数据当作最新备份");
-  return JSON.stringify({ ...state, exported_at: new Date().toISOString() }, null, 2);
+  validateWorkspace(state);
+  return encodeWorkspaceBackup(state);
 }
 export async function importFullBackup(value: unknown): Promise<WorkspaceSnapshot> {
   validateWorkspace(value);
+  await verifyWorkspaceBackup(value);
   const data = clone(value.data);
-  return commitWorkspace(previous => ({ ...data, ai_settings: { ...data.ai_settings, api_key: previous.ai_settings.api_key || '' } }), true);
+  return commitWorkspace(previous => {
+    const ai_settings = { ...data.ai_settings };
+    delete ai_settings.api_key;
+    if (typeof previous.ai_settings.api_key === 'string') ai_settings.api_key = previous.ai_settings.api_key;
+    return { ...data, ai_settings };
+  }, true);
 }

@@ -94,4 +94,13 @@ test('version conflict never blindly retries with a newer base revision', async 
   await assert.rejects(api.saveTasksToStorage([task('b')]), /conflict/);
   await assert.rejects(api.retryPendingSave(), /conflict/); assert.equal(state().revision, 4);
 });
+test('checksum failure in an otherwise valid backup never checkpoints or writes', async () => {
+  const { api, writes, state } = setup();
+  await api.saveTasksToStorage([task('valuable')]);
+  const before = clone(state()); const count = writes.length;
+  const backup = JSON.parse(await api.exportFullBackup());
+  backup.data.tasks[0].title = 'changed after export';
+  await assert.rejects(api.importFullBackup(backup), /校验值/);
+  assert.equal(writes.length, count); assert.deepEqual(state(), before);
+});
 process.on('exit', () => dom.window.close());

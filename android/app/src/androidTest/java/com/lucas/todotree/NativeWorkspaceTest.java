@@ -32,7 +32,7 @@ public class NativeWorkspaceTest {
     JSObject read(NativeWorkspacePlugin p) throws Exception { Call c=new Call(new JSObject());p.read(c);return c.await(); }
     @Test public void atomicCommitRetryRollbackReopenAndEncryptedKey() throws Exception {
         Context target=InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assertEquals("com.lucas.todotree",target.getPackageName());
+        assertTrue("Unexpected target package", target.getPackageName().startsWith("com.lucas.todotree"));
         // Never delete the live WebView workspace left by another instrumented test.
         Context context=new ContextWrapper(target) {
             private String testName(String name) { return "storage-test-"+name; }

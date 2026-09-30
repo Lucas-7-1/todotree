@@ -428,10 +428,10 @@ export function JournalEditor(p: Props) {
           )}
           <div className="j-tag-shortcuts" aria-label="常用事件标签">{['美食','旅行','购物','交通','日常'].map(tag=><button key={tag} aria-pressed={e.tags.includes(tag)} onClick={()=>update({tags:e.tags.includes(tag)?e.tags.filter(t=>t!==tag):[...e.tags,tag]})}>{tag}</button>)}</div>
           {(e.expense || e.tags.some(t=>/美食|购物|交通|住宿|消费/.test(t))) && <fieldset className="j-expense-box"><legend>这次消费 · 可留空</legend>
-            <div className="j-inline"><label className="j-label">{e.expense?.role==='item'?'明细价格':'账单 / 消费金额'}<input aria-label="消费金额" inputMode="decimal" placeholder="未知可留空，免费填 0" value={amountInput} onChange={ev=>priceChange(ev.target.value)}/></label>
+            <div className="j-money-fields"><label className="j-label">{e.expense?.role==='item'?'明细价格':'账单 / 消费金额'}<input aria-label="消费金额" inputMode="decimal" placeholder="金额（选填）" value={amountInput} onChange={ev=>priceChange(ev.target.value)}/></label>
             <label className="j-label">我实际支付<input aria-label="个人支付金额" inputMode="decimal" placeholder="选填" value={personalInput} onChange={ev=>priceChange(ev.target.value,true)}/></label></div>
-            {e.expense && <div className="j-inline"><select aria-label="消费币种" value={e.expense.currency} onChange={ev=>update({expense:{...e.expense!,currency:ev.target.value as any}})}>{['CNY','USD','EUR','JPY','HKD'].map(v=><option key={v}>{v}</option>)}</select><select aria-label="消费统计口径" value={e.expense.role} onChange={ev=>update({expense:{...e.expense!,role:ev.target.value as any,bill_id:ev.target.value==='item'?e.expense!.bill_id:e.id}})}><option value="bill">账单总额</option><option value="item">账单中的明细</option><option value="independent">独立消费</option></select></div>}
-            <small>总账单与其中明细分别保存，同一账单不重复相加。</small>
+            {e.expense && <div className="j-expense-options"><select aria-label="消费币种" value={e.expense.currency} onChange={ev=>update({expense:{...e.expense!,currency:ev.target.value as any}})}>{['CNY','USD','EUR','JPY','HKD'].map(v=><option key={v}>{v}</option>)}</select><select aria-label="消费统计口径" value={e.expense.role} onChange={ev=>update({expense:{...e.expense!,role:ev.target.value as any,bill_id:ev.target.value==='item'?e.expense!.bill_id:e.id}})}><option value="bill">账单总额</option><option value="item">账单中的明细</option><option value="independent">独立消费</option></select></div>}
+            <small>未知金额留空，免费填 0。总账单与明细分别保存，同一账单不重复相加。</small>
           </fieldset>}
           {!e.expense&&!e.tags.some(t=>/美食|购物|交通|住宿|消费/.test(t)) && <button className="j-text" onClick={()=>update({expense:{id:journalId(),bill_id:e.id,role:'independent',currency:'CNY',amount_minor:null,personal_minor:null}})}>＋ 记录消费</button>}
           <label className="j-label">

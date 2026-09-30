@@ -6,7 +6,8 @@ export { workspaceDelta } from './workspaceDelta';
 export interface NativeStore {
   read(): Promise<WorkspaceSnapshot>;
   commit(options: { expected_revision: number; operation_id: string; changes: NativeDelta[]; settings: object; ai_settings: object; checkpoint: boolean }): Promise<{ revision: number; operation_id: string; saved_at: string }>;
-  exportFile(options: { content: string; filename: string; mimeType?: string }): Promise<{ cancelled?: boolean }>;
+  exportFile(options: { content: string; filename: string; mimeType?: string }): Promise<{ cancelled?: boolean; verified?: boolean; byte_count?: number }>;
+  importFile(): Promise<{ cancelled?: boolean; content?: string; byte_count?: number }>;
   http(options: { id: string; url: string; method: string; headers: Record<string,string>; body?: string; timeout: number }): Promise<{ status: number; body: string }>;
   cancelHttp(options: { id: string }): Promise<void>;
 }

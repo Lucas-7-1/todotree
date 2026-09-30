@@ -1,13 +1,13 @@
-import { isAndroid } from '../services/native/platform';
-import { exportFullBackup, validateWorkspace, WorkspaceSnapshot, isDesktop, loadWorkspace } from '../services/durableStore';
+import { isAndroid, NativeWorkspace } from '../services/native/platform';
+import { exportFullBackup, WorkspaceSnapshot, isDesktop, loadWorkspace } from '../services/durableStore';
 import React, { useState, useRef, useEffect } from 'react';
 import { TaskNode, AppSettings } from '../types/todo';
 import { AISettings, PromptTemplate } from '../types/ai';
 import {
-  exportBackupData,
   downloadJsonFile,
-  validateImportJson
+  prepareTaskBackup
 } from '../services/importExport';
+import { readBackupFile } from '../services/backupCodec';
 import {
   loadAISettings,
   saveAISettings,
@@ -68,6 +68,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [isOpen]);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const backupLock = useRef(false);
+  const [backupBusy, setBackupBusy] = useState<'import' | 'export' | null>(null);
 
   // AI Settings State
   const [aiSettings, setAiSettings] = useState<AISettings>(DEFAULT_AI_SETTINGS);
@@ -224,43 +226,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   ];
 
   const handleExport = async () => {
-    try { await downloadJsonFile(await exportFullBackup()); }
+    if (backupLock.current) return;
+    backupLock.current = true; setBackupBusy('export'); setImportError(null); setImportSuccess(null);
+    try {
+      const result = await downloadJsonFile(await exportFullBackup());
+      if (!result.cancelled) setImportSuccess(result.verified
+        ? `任务备份已保存并回读校验 (${result.byte_count?.toLocaleString()} 字节)`
+        : '已发起任务备份下载，请检查下载目录中的文件是否保存成功');
+    }
     catch (error) { setImportError((error as Error).message); }
+    finally { backupLock.current = false; setBackupBusy(null); }
+  };
+
+  const restoreContent = async (content: string) => {
+    const result = await prepareTaskBackup(content);
+    if (!result.valid) throw new Error(result.error || '校验失败');
+    const count = result.tasks!.length;
+    const scope = result.workspace
+      ? `将恢复 ${count} 项任务、${result.workspace.data.events.length} 条历史与 ${result.workspace.data.reports.length} 份报告。`
+      : `这是旧版任务备份，将替换 ${tasks.length} 项现有任务，恢复 ${count} 项任务与备份中的设置；本机历史与报告保持不变。`;
+    if (!confirm(`${scope}${count === 0 ? '备份任务为空，恢复后当前任务列表也将为空。' : ''}现有数据会先建立恢复点，是否继续？`)) return;
+    await onImportTasks(result.tasks!, result.settings ? { ...settings, ...result.settings } : undefined, result.workspace);
+    onClose();
+  };
+
+  const runRestore = async (read: () => Promise<string | undefined>) => {
+    if (backupLock.current) return;
+    backupLock.current = true; setBackupBusy('import'); setImportError(null); setImportSuccess(null);
+    try { const content = await read(); if (content !== undefined) await restoreContent(content); }
+    catch (error) { setImportError((error as Error).message); }
+    finally { backupLock.current = false; setBackupBusy(null); }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    e.target.value = ''; // The same corrected file can be selected again after a failed import.
+    if (file) void runRestore(() => readBackupFile(file));
+  };
 
-    if (file.size > 32 * 1024 * 1024) { setImportError("备份超过 32 MB，请拆分或使用桌面版恢复"); return; }
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const content = event.target?.result as string;
-      try {
-        const full = JSON.parse(content);
-        if (full.schema_version === 2 && full.data) {
-          validateWorkspace(full);
-          if (confirm(`即将恢复 ${full.data.tasks.length} 项任务、完成历史与报告。现有数据会先建立恢复点，是否继续？`)) {
-            await onImportTasks(full.data.tasks, { ...settings, ...full.data.settings }, full); onClose();
-          }
-          return;
-        }
-      } catch (error) { setImportError((error as Error).message); return; }
-      const res = validateImportJson(content);
-      if (!res.valid) {
-        setImportError(res.error || '校验失败');
-        setImportSuccess(null);
-      } else {
-        setImportError(null);
-        setImportSuccess(`校验通过！成功解析 ${res.tasks!.length} 项任务`);
-        if (confirm(`即将用备份数据替换当前 ${tasks.length} 项任务，是否确认导入？`)) {
-          try { await onImportTasks(res.tasks!, res.settings); onClose(); }
-          catch (error) { setImportError((error as Error).message); }
-        }
-      }
-    };
-    reader.readAsText(file);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const chooseBackup = () => {
+    if (isAndroid()) void runRestore(async () => {
+      const result = await NativeWorkspace.importFile();
+      if (result.cancelled) return undefined;
+      if (typeof result.content !== 'string') throw new Error('未获得备份内容，请重新选择本地文件');
+      return result.content;
+    });
+    else fileInputRef.current?.click();
   };
 
   if (!isOpen) return null;
@@ -366,7 +377,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="border-t border-slate-100 pt-4 space-y-3">
                 <div className="text-xs font-bold text-slate-800">数据备份与迁移</div>
                 <div className="text-[11px] text-slate-400 leading-relaxed">
-                  桌面版保存到固定数据目录；网页版保存到当前浏览器。完整备份包含任务、完成历史、报告和设置，不包含 API Key。
+                  {isAndroid() ? '手机版保存到本机数据库；' : '桌面版保存到固定数据目录；网页版保存到当前浏览器。'}任务 JSON 包含任务、完成历史、报告和设置，不含 API Key。手帐（含图片）和健康请分别在对应模式中备份。
                 </div>
 
                 <div className="text-xs text-slate-500 break-all">
@@ -377,18 +388,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="flex gap-3">
                   <button
                     onClick={handleExport}
+                    disabled={backupBusy !== null}
                     className="flex-1 flex items-center justify-center gap-2 py-2 px-3 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl text-xs font-semibold transition-colors"
                   >
                     <Download className="w-4 h-4" />
-                    <span>导出任务备份 (JSON，不含手帐)</span>
+                    <span>{backupBusy === 'export' ? '正在导出与校验…' : '导出任务备份 (JSON)'}</span>
                   </button>
 
                   <button
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={chooseBackup}
+                    disabled={backupBusy !== null}
                     className="flex-1 flex items-center justify-center gap-2 py-2 px-3 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-semibold transition-colors"
                   >
                     <Upload className="w-4 h-4" />
-                    <span>从 JSON 恢复</span>
+                    <span>{backupBusy === 'import' ? '正在读取与校验…' : '从 JSON 恢复'}</span>
                   </button>
                   <input
                     ref={fileInputRef}

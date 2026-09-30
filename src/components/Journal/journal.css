@@ -593,9 +593,39 @@ html.journal-open .mobile-navigation {
   gap: 8px;
   margin: 12px 0;
 }
-.j-inline input {
+.j-inline > input {
   flex: 1;
   width: 0;
+}
+.j-money-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.j-money-fields .j-label {
+  margin: 0;
+  color: #526059;
+}
+.j-money-fields input {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  font-size: 16px;
+}
+.j-expense-options {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 10px;
+  margin: 12px 0;
+}
+.j-expense-options select {
+  width: 100%;
+  min-height: 44px;
+  font-size: 14px;
+}
+@media (max-width: 380px) {
+  .j-money-fields { grid-template-columns: minmax(0, 1fr); }
 }
 .j-inline button {
   display: flex;

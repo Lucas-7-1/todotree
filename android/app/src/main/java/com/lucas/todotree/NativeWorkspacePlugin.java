@@ -149,16 +149,71 @@ public class NativeWorkspacePlugin extends Plugin {
         });
     }
     @PluginMethod public void exportFile(PluginCall call) {
-        Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT); intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType(call.getString("mimeType","application/json")); intent.putExtra(Intent.EXTRA_TITLE,call.getString("filename","TodoTree-Backup.json"));
-        startActivityForResult(call,intent,"exportResult");
+        disk.execute(() -> {
+            File stage = null;
+            try {
+                String content = call.getString("content");
+                if (content == null || content.trim().isEmpty()) throw new IOException("Empty export");
+                byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+                if (bytes.length > LIMIT) throw new IOException("Export too large");
+                if (call.getString("mimeType", "application/json").contains("json")) new JSONObject(content);
+                stage = File.createTempFile("backup-export-", ".tmp", getContext().getCacheDir());
+                try (FileOutputStream stream = new FileOutputStream(stage)) { stream.write(bytes); stream.getFD().sync(); }
+                call.getData().put("export_stage_path", stage.getAbsolutePath());
+                call.getData().remove("content");
+                getBridge().executeOnMainThread(() -> {
+                    try {
+                        Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT); intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setType(call.getString("mimeType","application/json")); intent.putExtra(Intent.EXTRA_TITLE,call.getString("filename","TodoTree-Backup.json"));
+                        startActivityForResult(call,intent,"exportResult");
+                    } catch (Exception e) { removeExportStage(call); call.reject("无法打开文件保存窗口，请重试", "EXPORT_PICKER_FAILED"); }
+                });
+            } catch (Exception e) {
+                if (stage != null) stage.delete();
+                call.reject("未能准备完整导出文件，请检查内容与 32 MB 大小限制", "EXPORT_PREPARE_FAILED");
+            }
+        });
+    }
+    private void removeExportStage(PluginCall call) {
+        String path = call.getString("export_stage_path");
+        if (path != null) new File(path).delete();
     }
     @ActivityCallback private void exportResult(PluginCall call, ActivityResult result) {
         if(call==null) return;
-        if(result.getResultCode()!=Activity.RESULT_OK || result.getData()==null) { JSObject o=new JSObject();o.put("cancelled",true);call.resolve(o);return; }
-        disk.execute(() -> { try(OutputStream stream=getContext().getContentResolver().openOutputStream(result.getData().getData(),"wt")) {
-            if(stream==null) throw new IOException(); stream.write(call.getString("content","").getBytes(StandardCharsets.UTF_8)); call.resolve();
-        } catch(Exception e) { call.reject("备份导出失败，请选择可写入的位置"); } });
+        if(result.getResultCode()!=Activity.RESULT_OK || result.getData()==null) { removeExportStage(call); JSObject o=new JSObject();o.put("cancelled",true);call.resolve(o);return; }
+        disk.execute(() -> {
+            try {
+                String path = call.getString("export_stage_path");
+                if (path == null) throw new IOException("Missing staged backup");
+                byte[] bytes = BackupDocumentIO.read(new FileInputStream(path));
+                BackupDocumentIO.writeVerified(getContext().getContentResolver(), result.getData().getData(), bytes);
+                JSObject saved = new JSObject(); saved.put("verified", true); saved.put("byte_count", bytes.length);
+                call.resolve(saved);
+            } catch(Exception e) { call.reject("文件写入或回读校验失败，不能确认备份完整；请换一个本地目录重新导出", "EXPORT_VERIFY_FAILED"); }
+            finally { removeExportStage(call); }
+        });
+    }
+    @PluginMethod public void importFile(PluginCall call) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT); intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*"); intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/json", "text/plain", "application/octet-stream"});
+            startActivityForResult(call, intent, "importResult");
+        } catch (Exception e) { call.reject("无法打开备份选择窗口，请重试", "IMPORT_PICKER_FAILED"); }
+    }
+    @ActivityCallback private void importResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+            JSObject cancelled = new JSObject(); cancelled.put("cancelled", true); call.resolve(cancelled); return;
+        }
+        disk.execute(() -> {
+            try {
+                byte[] bytes = BackupDocumentIO.read(getContext().getContentResolver().openInputStream(result.getData().getData()));
+                if (bytes.length == 0) { call.reject("备份文件为空，请保存到本机后重试或从旧版重新导出", "IMPORT_EMPTY"); return; }
+                JSObject imported = new JSObject(); imported.put("content", BackupDocumentIO.decode(bytes)); imported.put("byte_count", bytes.length);
+                call.resolve(imported);
+            } catch (Exception e) { call.reject("无法完整读取备份，可能未下载、编码损坏或超过 32 MB；现有数据未改变", "IMPORT_READ_FAILED"); }
+        });
     }
     @PluginMethod public void http(PluginCall call) {
         String id=call.getString("id",""); Request request=new Request();
