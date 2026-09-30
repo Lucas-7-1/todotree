@@ -97,6 +97,11 @@ export interface FoodSnapshot {
   source_id: string | null;
   captured_at: string;
   data_type: string;
+  provider?: 'usda' | 'off' | 'manual';
+  brand?: string;
+  barcode?: string;
+  label_energy?: { kcal: number | null; basis: '100g' | '100ml' | 'unknown' };
+  license_url?: string;
 }
 export interface IntakeRecord {
   meal: string;

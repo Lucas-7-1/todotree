@@ -7,8 +7,8 @@ android {
         applicationId "com.lucas.todotree"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 8
-        versionName "1.0.0-life-preview.8"
+        versionCode 9
+        versionName "1.0.0-integrations-preview.9"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -28,7 +28,7 @@ android {
     }
     buildTypes {
         debug {
-            applicationIdSuffix ".lifev3"
+            applicationIdSuffix ".lifev31"
         }
         release {
             if (System.getenv("TODOTREE_KEYSTORE")) signingConfig signingConfigs.release

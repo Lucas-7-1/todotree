@@ -16,6 +16,17 @@ export interface RecurrenceRule {
   paused?: boolean;
 }
 
+export interface TaskReminderRule {
+  enabled: boolean;
+  trigger_at: string;
+  timezone: string;
+  revision: string;
+  exact: boolean;
+  channels: ('local' | 'feishu')[];
+  hide_title: boolean;
+  feishu_destination?: string;
+}
+
 export interface TaskNode {
   id: string;
   parent_id: string | null;
@@ -35,6 +46,7 @@ export interface TaskNode {
   background_text?: string;    // Optional background/context note (PRD v1.2 A31)
   instance_id?: string;        // Specific instance identifier (for recurring instances)
   health_occurrence_id?: string;
+  reminder?: TaskReminderRule | null;
   recurrence_rule_id?: string | null;
   recurrence_rule?: RecurrenceRule | null;
   recurrence_period_key?: string | null;

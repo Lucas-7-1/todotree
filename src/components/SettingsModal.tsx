@@ -1,3 +1,4 @@
+import { ConnectionsPanel } from './Connections/ConnectionsPanel';
 import { isAndroid, NativeWorkspace } from '../services/native/platform';
 import { exportFullBackup, WorkspaceSnapshot, isDesktop, loadWorkspace } from '../services/durableStore';
 import React, { useState, useRef, useEffect } from 'react';
@@ -42,9 +43,9 @@ interface SettingsModalProps {
   settings: AppSettings;
   onUpdateSettings: (newSettings: AppSettings) => void;
   tasks: TaskNode[];
-  onImportTasks: (newTasks: TaskNode[], newSettings?: AppSettings, full?: WorkspaceSnapshot) => Promise<void>;
+  onImportTasks: (newTasks: TaskNode[], newSettings?: AppSettings, full?: WorkspaceSnapshot, enableReminders?: boolean) => Promise<void>;
   onResetSeedData: () => void;
-  initialTab?: 'general' | 'ai';
+  initialTab?: 'general' | 'ai' | 'connections';
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -58,7 +59,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   initialTab = 'general',
 }) => {
 
-  const [activeTab, setActiveTab] = useState<'general' | 'ai'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'connections'>(initialTab);
   const [importError, setImportError] = useState<string | null>(null);
   const [storageInfo, setStorageInfo] = useState<any>(null);
   const [lastSaved, setLastSaved] = useState('');
@@ -245,7 +246,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const scope = result.workspace
       ? `将恢复 ${count} 项任务、${result.workspace.data.events.length} 条历史与 ${result.workspace.data.reports.length} 份报告。`
       : `这是旧版任务备份，将替换 ${tasks.length} 项现有任务，恢复 ${count} 项任务与备份中的设置；本机历史与报告保持不变。`;
-    if (!confirm(`${scope}${count === 0 ? '备份任务为空，恢复后当前任务列表也将为空。' : ''}现有数据会先建立恢复点，是否继续？`)) return;
+    if (!confirm(`${scope}${count === 0 ? '备份任务为空，恢复后当前任务列表也将为空。' : ''}现有数据会先建立恢复点；导入的提醒默认暂停，不会自动发送旧消息。是否继续？`)) return;
     await onImportTasks(result.tasks!, result.settings ? { ...settings, ...result.settings } : undefined, result.workspace);
     onClose();
   };
@@ -299,7 +300,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Tab Switcher */}
-        <div className="px-6 pt-3 border-b border-slate-100 flex items-center gap-4 bg-slate-50/50 flex-shrink-0">
+        <div className="settings-tabs px-4 pt-3 border-b border-slate-100 flex items-center gap-4 bg-slate-50/50 flex-shrink-0">
           <button
             onClick={() => setActiveTab('general')}
             className={`pb-2.5 text-xs font-semibold border-b-2 transition-colors ${
@@ -322,11 +323,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <Sparkles className="w-3.5 h-3.5" />
             <span>AI 与自动复盘</span>
           </button>
+          <button onClick={()=>setActiveTab('connections')} className={`pb-2.5 text-xs font-semibold border-b-2 ${activeTab==='connections'?'border-blue-600 text-blue-600':'border-transparent text-slate-500'}`}>连接与提醒</button>
         </div>
 
         {/* Body Container */}
         <div className="p-6 space-y-6 overflow-y-auto flex-1 text-slate-700">
-          {activeTab === 'general' ? (
+          {activeTab === 'connections' ? <ConnectionsPanel/> : activeTab === 'general' ? (
             /* General Settings Tab */
             <>
               {/* Timezone Setting */}

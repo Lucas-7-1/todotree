@@ -10,7 +10,10 @@ import {
   IntakeRecord,
 } from "../../services/health/model";
 import { commitHealth } from "../../services/health/store";
-import { commonFoods, foodIcon, searchFoods } from "../../services/health/food";
+import { commonFoods, foodIcon, searchFoods, nutritionLabel, FoodProvider } from "../../services/health/food";
+import { rememberFood } from "../../services/connections/store";
+import { ConnectionsDialog } from "../Connections/ConnectionsPanel";
+import { registerNavigationGuard } from "../../services/navigationGuard";
 export type RecordKind = "weight" | "intake" | "sleep";
 function localStamp(at: string) {
   const d = new Date(at);
@@ -71,6 +74,7 @@ export function HealthRecordEditor(p: {
     previous = Number.isFinite(Date.parse(at))
       ? previousWeight(p.records, new Date(at).toISOString())
       : null;
+  const [provider,setProvider]=useState<FoodProvider>(draft.provider||"usda"), [connections,setConnections]=useState(false), [foodNotice,setFoodNotice]=useState("");
   const [query, setQuery] = useState(draft.query || ""),
     [food, setFood] = useState<FoodSnapshot | null>(draft.food || null),
     [foods, setFoods] = useState<FoodSnapshot[]>([]),
@@ -101,6 +105,7 @@ export function HealthRecordEditor(p: {
     weight,
     unit,
     query,
+    provider,
     food,
     grams,
     kcal100,
@@ -162,6 +167,7 @@ export function HealthRecordEditor(p: {
     weight,
     unit,
     query,
+    provider,
     food,
     grams,
     kcal100,
@@ -187,8 +193,14 @@ export function HealthRecordEditor(p: {
   };
   const handlers = useRef({ close, saveDraft });
   handlers.current = { close, saveDraft };
+  useEffect(() => registerNavigationGuard(async () => {
+    if (lock.current) return false;
+    try { await handlers.current.saveDraft(true); }
+    catch (e) { setError((e as Error).message); throw e; }
+  }), []);
   useEffect(() => {
     const back = (e: Event) => {
+      if(document.querySelector(".connection-overlay,.place-overlay"))return;
       e.preventDefault();
       e.stopImmediatePropagation();
       void handlers.current.close();
@@ -213,17 +225,20 @@ export function HealthRecordEditor(p: {
     setError("");
     const timer = setTimeout(() => controller.abort(), 12000);
     try {
-      setFoods(await searchFoods(query, controller.signal));
+      const results=await searchFoods(query, controller.signal,provider);
+      if(!controller.signal.aborted){setFoods(results);setFoodNotice(results.length?"请选择与实际食物、状态匹配的条目":"没有匹配结果，仍可直接保存名称与克重");}
     } catch (e) {
-      setError(
-        controller.signal.aborted
-          ? "查询超时，可继续手动记录"
-          : (e as Error).message,
-      );
+      if(search.current===controller&&!controller.signal.aborted)setError((e as Error).message);
     } finally {
       clearTimeout(timer);
-      setSearching(false);
+      if(search.current===controller)setSearching(false);
     }
+  };
+  const changeQuery=(value:string)=>{search.current?.abort();setSearching(false);setFoods([]);setQuery(value);setFood(null);setFoodNotice('');};
+  const saveLabel=async()=>{
+    try{const label:FoodSnapshot=food||{id:'personal-'+crypto.randomUUID(),name:query.trim(),state,provider:'manual',source:'用户输入（包装或配方）',source_url:null,source_id:null,kcal_per_100g:enteredNumber(kcal100,true),captured_at:new Date().toISOString(),data_type:'个人营养标签'};
+      if(!label.name)throw Error('先填写食物名称');await rememberFood(label);setFood(label);setFoodNotice('已保存个人标签，下次可搜索；不会改变历史饮食记录');
+    }catch(e){setError((e as Error).message);}
   };
   const save = async () => {
     if (lock.current) return;
@@ -337,6 +352,7 @@ export function HealthRecordEditor(p: {
   );
   return (
     <section className="h-editor">
+      {connections&&<ConnectionsDialog onClose={()=>setConnections(false)}/>}
       <header className="h-header">
         <button
           className="h-icon"
@@ -507,14 +523,14 @@ export function HealthRecordEditor(p: {
                   </button>
                 ))}
               </div>
+              <div className="food-source-select"><label>查询来源<select aria-label="食品查询来源" value={provider} onChange={e=>{changeQuery(query);setProvider(e.target.value as FoodProvider);}}><option value="usda">普通食材 · USDA</option><option value="off">包装条码 · Open Food Facts</option><option value="personal">我的营养标签</option></select></label><button onClick={()=>setConnections(true)}>来源设置</button></div>
               <div className="h-food-search">
                 <input
                   aria-label="食物名称"
-                  placeholder="搜食物，也可只记录名称"
+                  placeholder={provider==="off"?"输入包装条码；也可手动记录名称":"搜食物，也可只记录名称"}
                   value={query}
                   onChange={(e) => {
-                    setQuery(e.target.value);
-                    setFood(null);
+                    changeQuery(e.target.value);
                   }}
                 />
                 <button
@@ -531,14 +547,14 @@ export function HealthRecordEditor(p: {
                   <button
                     key={f}
                     onClick={() => {
-                      setQuery(f);
-                      setFood(null);
+                      changeQuery(f);
                     }}
                   >
                     {foodIcon(f)} {f}
                   </button>
                 ))}
               </div>
+              {foodNotice&&<p className="h-muted" role="status">{foodNotice}</p>}
               {searching && <p role="status">正在查询公开食品来源…</p>}
               {foods.length > 0 && (
                 <div className="h-food-results">
@@ -555,9 +571,7 @@ export function HealthRecordEditor(p: {
                       <div>
                         <strong>{f.name}</strong>
                         <small>
-                          {f.kcal_per_100g === null
-                            ? "能量未知"
-                            : f.kcal_per_100g + " kcal / 100g"}{" "}
+                          {nutritionLabel(f)}{" "}
                           · {f.data_type}
                         </small>
                       </div>
@@ -589,6 +603,8 @@ export function HealthRecordEditor(p: {
                   </label>
                 </>
               )}
+              {food&&<div className="h-muted">{food.brand&&<strong>{food.brand} · </strong>}{nutritionLabel(food)}{food.label_energy?.basis!==undefined&&food.label_energy.basis!=='100g'&&<p>这份标签无法直接计算每克能量，仍可保存食物与克重；按包装补充每 100g 数据后再计算。</p>}<button onClick={()=>{setState(food.state);setFood(null);setKcal100('');}}>改用手动营养数据</button></div>}
+              <button onClick={()=>void saveLabel()} disabled={!query.trim()}>收藏这份营养标签</button>
               <label>
                 实际可食克重
                 <input

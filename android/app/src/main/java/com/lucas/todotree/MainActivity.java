@@ -6,6 +6,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativeWorkspacePlugin.class);
         registerPlugin(JournalPlugin.class);
         registerPlugin(HealthPlugin.class);
+        registerPlugin(ConnectionsPlugin.class);
         super.onCreate(state);
     }
 }

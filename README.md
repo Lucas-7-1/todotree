@@ -8,6 +8,8 @@
 
 预览 debug 包可与旧版并存，不会自动读取旧应用数据；从旧版导出备份后导入预览版。正式覆盖升级仍须使用原签名。构建运行 `npm ci`、`npm test`、`npm run android:sync`，再到 `android` 目录执行 `./gradlew :app:assembleDebug`。仓库已有的静态单文件和 EXE 没有在本次重新打包。
 
+v3.1 增加地点选择、Android 接收分享、USDA / OFF / 个人营养标签、待办原生提醒及可选飞书机器人。安装版使用新的独立预览包 `.lifev31`，需分别导入旧版待办、手帐和健康备份；完整入口、范围、迁移与真实环境验证限制见 [v3.1 实施说明](docs/Integrations-v3.1-implementation.md)。
+
 ---
 
 ## 🌟 核心特性与架构全景

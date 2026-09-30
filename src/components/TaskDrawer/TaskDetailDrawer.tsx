@@ -32,6 +32,7 @@ import {
   BookOpen
 } from 'lucide-react';
 
+import { TaskReminderEditor } from "../Connections/TaskReminderEditor";
 interface TaskDetailDrawerProps {
   task: TaskNode | null;
   allTasks: TaskNode[];
@@ -552,6 +553,8 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
               </div>
             )}
           </div>
+
+          <TaskReminderEditor key={task.id} task={task} path={getAncestorPath(allTasks,task).join(" / ")} onSave={reminder=>onUpdateTask(task.id,{reminder},"single")}/>
 
           {/* Quadrant Picker */}
           <div>

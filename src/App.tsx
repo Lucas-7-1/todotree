@@ -80,15 +80,21 @@ import {
 } from './services/ai/reportService';
 import { buildFactsPackage } from './services/ai/factsEngine';
 
+import { NativeConnections } from "./services/connections/store";
+import { parsePlaceShare } from "./services/connections/places";
+import { prepareNavigation } from "./services/navigationGuard";
 const JournalApp = React.lazy(() => import('./components/Journal/JournalApp'));
 const HealthApp = React.lazy(() => import('./components/Health/HealthApp'));
 
 export const App: React.FC = () => {
-  const [journalState, setJournalState] = useState<{create:boolean}|null>(() => readMode() === 'journal' ? {create:false} : null);
+  const [journalState, setJournalState] = useState<{create:boolean;draftId?:string}|null>(() => readMode() === 'journal' ? {create:false} : null);
   const [healthState, setHealthState] = useState<{occurrenceId:string|null;sessionId?:string}|null>(() => readMode() === 'health' ? {occurrenceId:null} : null);
   const changeMode = async (mode:AppMode, occurrenceId:string|null=null, create=false) => {
+    try {
     if (pendingNavigationGuard.current && !(await pendingNavigationGuard.current())) return;
+    if (!(await prepareNavigation())) return;
     rememberMode(mode); setJournalState(mode==='journal'?{create}:null); setHealthState(mode==='health'?{occurrenceId}:null);
+    } catch (e) { setToast({id:'navigation-'+Date.now(),type:'info',title:'草稿未能保存，已留在当前页面：'+(e as Error).message}); }
   };
   const modeHandler = useRef(changeMode); modeHandler.current = changeMode;
   useEffect(() => {
@@ -99,7 +105,7 @@ export const App: React.FC = () => {
   }, []);
   useEffect(()=>{
     if(!isAndroid())return;let alive=true;let remove:(()=>void)|undefined;
-    const open=(id:string|null)=>{if(!alive||!id)return;rememberMode('health');setJournalState(null);setHealthState({occurrenceId:null,sessionId:id});};
+    const open=(id:string|null)=>{if(!alive||!id)return;void(async()=>{if(pendingNavigationGuard.current&&!(await pendingNavigationGuard.current()))return;if(!(await prepareNavigation())||!alive)return;rememberMode('health');setJournalState(null);setHealthState({occurrenceId:null,sessionId:id});})().catch(e=>setToast({id:'session-navigation-'+Date.now(),type:'info',title:(e as Error).message}));};
     void HealthNative.takeLaunchSession().then(e=>open(e.session_id)).catch(()=>{});
     void HealthNative.addListener('openSession',e=>open(e.session_id)).then(h=>{if(alive)remove=()=>void h.remove();else void h.remove();});
     return()=>{alive=false;remove?.();};
@@ -929,6 +935,7 @@ export const App: React.FC = () => {
       ...task,
       id: newRootId,
       title: `${task.title} (副本)`,
+      reminder:null,
       status: 'open',
       completed_at: null,
       archived_at: null,
@@ -959,6 +966,7 @@ export const App: React.FC = () => {
           ...d,
           id: idMap.get(d.id)!,
           parent_id: clonedParentId,
+          reminder:null,
           status: 'open',
           completed_at: null,
           archived_at: null,
@@ -1311,10 +1319,10 @@ export const App: React.FC = () => {
   };
 
   // Both legacy and complete backups commit through one versioned transaction.
-  const handleImportTasks = async (newTasks: TaskNode[], newSettings?: AppSettings, full?: WorkspaceSnapshot) => {
+  const handleImportTasks = async (newTasks: TaskNode[], newSettings?: AppSettings, full?: WorkspaceSnapshot, enableReminders=false) => {
     try {
       const current = await loadWorkspace();
-      const restored = await importFullBackup(full || { ...current, data: { ...current.data, tasks: newTasks, settings: newSettings || current.data.settings } });
+      const restored = await importFullBackup(full || { ...current, data: { ...current.data, tasks: newTasks, settings: newSettings || current.data.settings } },{enableReminders});
       tasksRef.current = restored.data.tasks; setTasks(restored.data.tasks);
       setSettings(previous => ({ ...previous, ...restored.data.settings }));
       setReviewSavedReports(restored.data.reports);
@@ -1366,14 +1374,47 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('todotree:navigate-back', back);
   }, [isSettingsModalOpen, isCreateModalOpen, isTemplateModalOpen, auxiliaryPanel.type, currentView]);
 
+  const [launchTask,setLaunchTask]=useState<string|null>(null),[incomingShare,setIncomingShare]=useState<{text:string;share_id:string}|null>(null),[shareBusy,setShareBusy]=useState(false),[shareNotice,setShareNotice]=useState<string|null>(null);
+  const sharedIds=useRef(new Set<string>()),shareLock=useRef(false),launchRef=useRef(launchTask);launchRef.current=launchTask;
+  useEffect(()=>{if(!isAndroid())return;let alive=true;const removers:(()=>void)[]=[];
+    const take=(r:{task_id?:string})=>{if(alive&&r.task_id)setLaunchTask(r.task_id);};
+    const share=(r:{text?:string;share_id?:string})=>{if(alive&&r.text&&r.share_id&&!sharedIds.current.has(r.share_id)){sharedIds.current.add(r.share_id);if(sharedIds.current.size>100)sharedIds.current.delete(sharedIds.current.values().next().value!);setIncomingShare({text:r.text.slice(0,8000),share_id:r.share_id});}};
+    void (async()=>{for(const [name,callback] of [['openTask',take],['sharedText',share]] as const){const h=await NativeConnections.addListener(name,callback);if(alive)removers.push(()=>void h.remove());else void h.remove();}take(await NativeConnections.takeTask());share(await NativeConnections.takeSharedText());})().catch(()=>{});
+    return()=>{alive=false;removers.forEach(remove=>remove());};
+  },[]);
+  useEffect(()=>{if(!loaded||!launchTask)return;const targetId=launchTask;
+    void (async()=>{if(pendingNavigationGuard.current&&!(await pendingNavigationGuard.current()))return;if(launchRef.current!==targetId)return;
+      if(!(await prepareNavigation())||launchRef.current!==targetId)return;
+      const target=tasksRef.current.find(t=>t.id===targetId);setLaunchTask(null);
+      if(!target||target.deleted_at){setToast({id:'launch-'+Date.now(),type:'info',title:'这条待办已被删除或不存在'});return;}
+      rememberMode('tasks');setJournalState(null);setHealthState(null);setCurrentView('tree');setSelectedTaskId(target.id);setAuxiliaryPanel({type:'task_detail'});
+    })().catch(e=>setToast({id:'launch-error-'+Date.now(),type:'info',title:(e as Error).message}));
+  },[loaded,launchTask]);
+  useEffect(()=>{const warning=(e:Event)=>setToast({id:'reminder-'+Date.now(),type:'info',title:(e as CustomEvent).detail});window.addEventListener('todotree:reminder-error',warning);return()=>window.removeEventListener('todotree:reminder-error',warning);},[]);
+  const saveSharedDraft=async()=>{if(!incomingShare||shareLock.current)return;shareLock.current=true;setShareBusy(true);try{
+    const [{journal},{newJournal,journalToday}]=await Promise.all([import('./services/journal/store'),import('./services/journal/model')]);
+    await journal.boot();const draft=newJournal(journalToday());draft.id='share-'+incomingShare.share_id;draft.entry.description=incomingShare.text;draft.entry.place_url=parsePlaceShare(incomingShare.text).source_url;
+    await journal.mutate('saveDraft',{draft});setIncomingShare(null);
+    if(document.querySelector('.j-editor,.h-editor,.h-workout-editor,.h-runner'))setShareNotice('分享内容已保存为手帐草稿。可继续当前记录，稍后在手帐草稿列表中查看。');
+    else if((!pendingNavigationGuard.current||await pendingNavigationGuard.current())&&await prepareNavigation()){rememberMode('journal');setHealthState(null);setJournalState({create:false,draftId:draft.id});}
+    else setShareNotice('分享内容已保存为手帐草稿。请先完成当前操作，再到手帐草稿列表查看。');
+  }catch(e){setShareNotice('保存分享内容失败：'+(e as Error).message);}finally{shareLock.current=false;setShareBusy(false);}};
+  useEffect(()=>{
+    if(!incomingShare&&!shareNotice)return;
+    const back=(e:Event)=>{e.preventDefault();e.stopImmediatePropagation();if(!shareLock.current){setIncomingShare(null);setShareNotice(null);}};
+    window.addEventListener('todotree:back',back,true);
+    return()=>window.removeEventListener('todotree:back',back,true);
+  },[incomingShare,shareNotice]);
+
   const quickInputParent = quickInputParentId
     ? tasks.find((t) => t.id === quickInputParentId) || null
     : null;
 
   return (
     <div className="app-shell flex h-screen w-screen overflow-hidden bg-[#f8fafc] text-slate-800">
+      {(incomingShare||shareNotice)&&<div className="connection-overlay"><section className="connection-dialog" role="dialog" aria-modal="true" aria-label="保存分享内容"><header><h2>{shareNotice?'分享内容':'收到分享内容'}</h2></header><div className="connection-body">{shareNotice?<><p role="status">{shareNotice}</p><button className="connection-primary" onClick={()=>setShareNotice(null)}>继续当前页面</button></>:<><p>收进手帐草稿，编辑确认后再发布；不会自动生成消费或待办。</p><p className="connection-hint">{incomingShare?.text.slice(0,300)}</p><div className="place-actions"><button disabled={shareBusy} className="connection-primary" onClick={()=>void saveSharedDraft()}>{shareBusy?'保存中…':'存为手帐草稿'}</button><button disabled={shareBusy} onClick={()=>setIncomingShare(null)}>放弃这次分享</button></div></>}</div></section></div>}
       {/* 1. Left Sidebar */}
-      {journalState && <React.Suspense fallback={<div className="fixed inset-0 z-[180] bg-white p-8">正在翻开手帐…</div>}><JournalApp create={journalState.create} onClose={() => void changeMode('tasks')} onModeChange={mode=>void changeMode(mode)} /></React.Suspense>}
+      {journalState && <React.Suspense fallback={<div className="fixed inset-0 z-[180] bg-white p-8">正在翻开手帐…</div>}><JournalApp create={journalState.create} initialDraftId={journalState.draftId} onClose={() => void changeMode('tasks')} onModeChange={mode=>void changeMode(mode)} /></React.Suspense>}
       {healthState && <React.Suspense fallback={<div className="fixed inset-0 z-[180] bg-white p-8">正在读取健康记录…</div>}><HealthApp tasks={tasks} occurrenceId={healthState.occurrenceId} launchSessionId={healthState.sessionId} onModeChange={mode=>void changeMode(mode)} onLink={linkWorkout}/></React.Suspense>}
       <Sidebar
         currentView={currentView}

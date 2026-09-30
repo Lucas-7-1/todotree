@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Camera,
+  MapPin,
   ImagePlus,
   X,
   ChevronUp,
@@ -22,6 +23,8 @@ import {
 } from "../../services/journal/model";
 import { journal } from "../../services/journal/store";
 import { JournalImage } from "./JournalImage";
+import { PlacePicker } from "../Connections/PlacePicker";
+import { registerNavigationGuard } from "../../services/navigationGuard";
 interface Props {
   draft: JournalDraft;
   books: JournalBook[];
@@ -30,6 +33,7 @@ interface Props {
   onBook: () => Promise<void>;
 }
 export function JournalEditor(p: Props) {
+  const [placeOpen,setPlaceOpen]=useState(false);
   const [draft, setDraft] = useState(p.draft),
     latest = useRef(draft);
   latest.current = draft;
@@ -104,13 +108,18 @@ export function JournalEditor(p: Props) {
       p.onClose();
     } catch {}
   };
-  const handlers = useRef({ close, flush });
-  handlers.current = { close, flush };
+  const handlers = useRef({ close, flush, importing });
+  handlers.current = { close, flush, importing };
+  useEffect(() => registerNavigationGuard(async () => {
+    if (busy.current || paused.current || handlers.current.importing) return false;
+    await handlers.current.flush();
+  }), []);
   useEffect(() => {
     const hide = () => {
       if (document.hidden) void handlers.current.flush().catch(() => {});
     };
     const back = (e: Event) => {
+      if(document.querySelector(".connection-overlay,.place-overlay"))return;
       e.preventDefault();
       e.stopImmediatePropagation();
       void handlers.current.close();
@@ -273,6 +282,7 @@ export function JournalEditor(p: Props) {
   const e = draft.entry;
   return (
     <section className="j-editor j-page" aria-label="编辑手帐">
+      {placeOpen&&<PlacePicker initial={e.place} onClose={()=>setPlaceOpen(false)} onChoose={place=>{update({place,location_text:place.name,place_url:place.source_url});setPlaceOpen(false);}}/>}
       <header className="j-header">
         <button
           className="j-icon"
@@ -357,8 +367,10 @@ export function JournalEditor(p: Props) {
               <Camera size={20} />
               拍照
             </button>
+            <button type="button" onClick={()=>setPlaceOpen(true)}><MapPin size={20}/>地点</button>
             <small>{e.images.length} / 20</small>
           </div>
+          {e.location_text&&<button type="button" className="j-location-summary" onClick={()=>setPlaceOpen(true)}>{e.location_text}{e.place?.address?` · ${e.place.address}`:""}</button>}
           {failures.length > 0 && (
             <div className="j-error">
               {failures.map((m, i) => (
@@ -517,10 +529,12 @@ export function JournalEditor(p: Props) {
                   maxLength={200}
                   placeholder="店名、景点或城市（选填）"
                   value={e.location_text}
-                  onChange={(ev) => update({ location_text: ev.target.value })}
+                  onChange={(ev) => update({ location_text: ev.target.value,place:null })}
                 />
               </label>
-              <label className="j-label">地点分享链接<input aria-label="地点分享链接" placeholder="粘贴高德 / 美团 / 口碑链接（选填）" value={e.place_url || ''} onChange={ev=>update({place_url:ev.target.value || null})}/></label>
+              <div className="place-actions"><button type="button" onClick={()=>setPlaceOpen(true)}>搜索门店 / 导入分享地点</button>{e.place&&<button type="button" onClick={()=>update({place:null,place_url:null,location_text:''})}>清除地点</button>}</div>
+              {e.place&&<p className="j-hint">{e.place.city} {e.place.address} · {e.place.provider==='amap'?'高德地点':'用户确认地点'}</p>}
+              <label className="j-label">地点分享链接<input aria-label="地点分享链接" placeholder="粘贴高德 / 美团 / 口碑链接（选填）" value={e.place_url || ''} onChange={ev=>update({place_url:ev.target.value || null,place:null})}/></label>
               <div className="j-label">
                 这次体验
                 <div className="j-stars">

@@ -1,0 +1,33 @@
+.connection-overlay,.place-overlay{position:fixed;inset:0;z-index:260;background:rgba(25,40,40,.3);display:flex;align-items:center;justify-content:center;padding:16px}
+.connection-dialog,.place-dialog{background:white;border-radius:20px;width:min(100%,540px);max-height:90dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 50px #172b3022;color:#22312d}
+.connection-dialog header,.place-dialog header{display:flex;align-items:center;justify-content:space-between;padding:16px;border-bottom:1px solid #edf0f1}
+.connection-dialog header h2,.place-dialog header h2{font-size:18px;font-weight:700;margin:0}
+.connection-body,.place-body{padding:16px;overflow-y:auto;overscroll-behavior:contain}
+.connection-body section{padding:14px 0;border-bottom:1px solid #edf0f1}
+.connection-body h3{font-size:15px;font-weight:700;margin:0 0 10px}
+.connection-body label,.place-body label{display:flex;flex-direction:column;gap:6px;font-size:13px;margin:10px 0}
+.connection-body input:not([type=checkbox]),.place-body input,.place-body textarea{box-sizing:border-box;width:100%;min-width:0;min-height:44px;border:1px solid #dce4e8;border-radius:10px;background:#fafcfc;padding:10px;font-size:16px}
+.connection-body button,.place-body button,.connection-dialog header button,.place-dialog header button{min-height:44px;padding:8px 12px;border-radius:10px;border:1px solid #e1e7ea;background:white;cursor:pointer}
+.connection-body button:disabled,.place-body button:disabled{opacity:.5;cursor:default}
+.connection-body .connection-primary,.place-body .connection-primary{background:#2563eb;color:white;border:0}
+.connection-body .connection-check{flex-direction:row;align-items:center;gap:8px;min-height:44px}
+.connection-body .connection-check input[type=checkbox],.reminder-card .connection-check input[type=checkbox]{width:20px;height:20px;min-width:20px;min-height:20px;flex:0 0 20px;margin:0;accent-color:#2563eb}
+.connection-hint{font-size:12px;color:#70817b;line-height:1.6;margin:8px 0}
+.connection-error{background:#fff2f3;color:#ac3048;padding:10px;border-radius:10px;font-size:13px;line-height:1.6}
+.connection-notice{background:#eef8f5;color:#217661;padding:10px;border-radius:10px;font-size:13px}
+.place-result{width:100%;text-align:left;margin:8px 0;display:flex;flex-direction:column;gap:5px}
+.place-result small{font-size:12px;color:#6f817a}
+.place-confirm{background:#f0f6ff;border:1px solid #cddcf5;border-radius:12px;padding:12px;margin:12px 0;overflow-wrap:anywhere}
+.place-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.reminder-card{border:1px solid #e1e7ed;border-radius:12px;padding:12px;margin:16px 0;font-size:13px}
+.reminder-card h3{font-weight:700;margin:0 0 8px}.reminder-card label{display:flex;gap:6px;align-items:center;min-height:36px;margin:8px 0}
+.reminder-card input[type=datetime-local]{width:100%;min-width:0;min-height:44px;padding:8px;border:1px solid #dce4e8;border-radius:8px;font-size:16px}
+.reminder-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.reminder-actions button{min-height:40px;padding:8px 12px;border:1px solid #dce4e8;border-radius:8px;background:#f7faff}
+.food-source-select{display:flex;align-items:center;gap:8px;margin:8px 0}.food-source-select select{min-height:44px;min-width:0;flex:1}.food-source-select button{min-height:44px;padding:8px}
+@media(max-width:600px){.connection-overlay,.place-overlay{padding:0}.connection-dialog,.place-dialog{width:100%;height:100dvh;max-height:100dvh;border-radius:0;padding-top:var(--safe-area-inset-top,0px);padding-bottom:var(--safe-area-inset-bottom,0px)}.connection-body,.place-body{padding:16px 16px 28px}}
+
+.food-source-select label{flex:1;min-width:0}.food-source-select select{width:100%}.food-source-select button{flex-shrink:0}
+.reminder-card>label:not(.connection-check){display:block}.reminder-card .connection-check{min-height:44px}.reminder-actions .connection-primary{background:#2563eb;color:white}
+.settings-tabs{overflow-x:auto;max-width:100%;scrollbar-width:none}.settings-tabs button{flex-shrink:0}.settings-tabs::-webkit-scrollbar{display:none}
+.settings-overlay .connection-body{padding:0;overflow:visible}
+.connection-hint,.connection-notice,.connection-error{overflow-wrap:anywhere}

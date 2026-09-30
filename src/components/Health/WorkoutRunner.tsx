@@ -262,10 +262,11 @@ export function WorkoutRunner(p: {
                     <p>
                       {permissions?.granted
                         ? permissions.exact
-                          ? "已开启本机休息提醒"
+                          ? "通知与准时权限已开启；锁屏效果请实机核对"
                           : "通知可用，锁屏提醒可能延迟"
                         : "通知未授权；应用内计时正常"}
                     </p>
+                    <p>短时间内连续组间休息可能受系统后台限制；需要稳定计时可打开系统计时器，并在系统页面确认。</p>
                     {!permissions?.granted && (
                       <button
                         onClick={() =>

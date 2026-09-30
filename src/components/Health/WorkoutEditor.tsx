@@ -9,6 +9,7 @@ import {
   validateTemplate,
 } from "../../services/health/model";
 import { commitHealth } from "../../services/health/store";
+import { registerNavigationGuard } from "../../services/navigationGuard";
 export function WorkoutEditor(p: {
   record: HealthEntity | null;
   initial: WorkoutTemplate;
@@ -55,6 +56,11 @@ export function WorkoutEditor(p: {
   };
   const handlers = useRef({ saveDraft });
   handlers.current = { saveDraft };
+  useEffect(() => registerNavigationGuard(async () => {
+    if (lock.current) return false;
+    try { await handlers.current.saveDraft(); }
+    catch (e) { setError((e as Error).message); throw e; }
+  }), []);
   useEffect(() => {
     const timer = setTimeout(
       () => void handlers.current.saveDraft().catch((e) => setError(e.message)),

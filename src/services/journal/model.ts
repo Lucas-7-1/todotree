@@ -24,6 +24,7 @@ export interface JournalEntry {
   version: number;
   expense?: JournalExpense | null;
   place_url?: string | null;
+  place?: import('../connections/places').PlaceReference | null;
 }
 export interface JournalExpense {
   id: string;
@@ -182,6 +183,8 @@ export function validateJournal(e: JournalEntry, publish = true) {
     for(const value of [x.amount_minor,x.personal_minor])if(value!==null&&(!Number.isSafeInteger(value)||value<0||value>99999999999))throw Error('金额无效');
   }
   if(e.place_url && !/^https?:\/\//i.test(e.place_url))throw Error('地点链接应为 HTTP 或 HTTPS');
+  if(e.place && (!['amap','manual','share'].includes(e.place.provider) || typeof e.place.name !== 'string' || !e.place.name.trim() || e.place.name.length>200 || !Number.isFinite(Date.parse(e.place.confirmed_at)))) throw Error('地点信息无效，请重新确认');
+  if(e.place?.location && (!Number.isFinite(e.place.location.longitude) || !Number.isFinite(e.place.location.latitude) || Math.abs(e.place.location.longitude)>180 || Math.abs(e.place.location.latitude)>90)) throw Error('地点坐标无效');
   if (publish && !journalHasContent(e)) throw Error("写点内容或添加照片再保存");
 }
 export function journalTitle(e: JournalEntry) {

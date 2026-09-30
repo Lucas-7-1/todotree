@@ -129,10 +129,16 @@ public class NativeWorkspacePlugin extends Plugin {
                 JSONObject ai=new JSONObject(call.getObject("ai_settings",new JSObject()).toString());
                 String secret=ai.optString("api_key",""); ai.remove("api_key");
                 String sealed=encrypt(secret);
+                Set<String> reminderIds=new HashSet<>();
                 db.beginTransaction();
                 for(int i=0;i<changes.length();i++) {
                     JSONObject row=changes.getJSONObject(i); String collection=row.getString("collection"),id=row.getString("id");
                     if(!COLLECTIONS.contains(collection) || id.isEmpty()) throw new Exception("非法记录类型");
+                    if("tasks".equals(collection)) {
+                        boolean hasRule=!row.isNull("value")&&new JSONObject(row.getString("value")).optJSONObject("reminder")!=null;
+                        if(hasRule)reminderIds.add(id);
+                        else try(Cursor old=db.rawQuery("SELECT body FROM records WHERE collection='tasks' AND id=?",new String[]{id})) {if(old.moveToFirst()&&new JSONObject(old.getString(0)).optJSONObject("reminder")!=null)reminderIds.add(id);}
+                    }
                     if(row.isNull("value")) db.delete("records","collection=? AND id=?",new String[]{collection,id});
                     else { String body=row.getString("value"); new JSONObject(body);
                         ContentValues v=new ContentValues();v.put("collection",collection);v.put("id",id);v.put("body",body);v.put("position",row.optInt("position",i));
@@ -141,7 +147,11 @@ public class NativeWorkspacePlugin extends Plugin {
                 }
                 put(db,"settings",call.getObject("settings",new JSObject()).toString()); put(db,"ai_settings",ai.toString()); put(db,"api_key",sealed);
                 put(db,"revision",String.valueOf(revision+1)); put(db,"operation_id",op); put(db,"saved_at",now());
-                db.setTransactionSuccessful(); db.endTransaction(); call.resolve(ack(db));
+                db.setTransactionSuccessful(); db.endTransaction();
+                JSObject committed=ack(db);
+                try { for(int i=0;i<changes.length();i++) {JSONObject row=changes.getJSONObject(i);if("tasks".equals(row.optString("collection"))&&reminderIds.contains(row.optString("id"))) {if(row.isNull("value"))TaskReminderReceiver.cancel(getContext(),row.getString("id"));else TaskReminderReceiver.schedule(getContext(),new JSONObject(row.getString("value")));}} }
+                catch(Exception reminder) {committed.put("reminder_error","任务已保存，系统提醒未设置成功，请打开任务重新检查");}
+                call.resolve(committed);
             } catch(Exception e) {
                 if(db!=null && db.inTransaction()) db.endTransaction();
                 call.reject("保存失败，未确认完成："+e.getClass().getSimpleName(),"WRITE_FAILED");

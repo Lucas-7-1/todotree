@@ -35,6 +35,7 @@ jobs:
           node tests/journal-tree-browser.cjs
           node tests/health-browser.cjs
           node tests/backup-money-browser.cjs
+          node tests/connections-browser.cjs
         env:
           MOBILE_QA_DIR: /tmp/journal-browser-qa
       - name: Preserve browser review screenshots

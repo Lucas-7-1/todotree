@@ -1,6 +1,7 @@
 import { isAndroid, NativeWorkspace, workspaceDelta } from './native/platform';
 import { TaskNode, AppSettings } from '../types/todo';
 import { TaskEvent, SavedReport, AISettings, AIAttempt } from '../types/ai';
+import { validateReminder, pauseImportedReminders } from './connections/reminders';
 import { encodeWorkspaceBackup, verifyWorkspaceBackup } from './backupCodec';
 
 export interface WorkspaceData {
@@ -38,6 +39,7 @@ export function validateWorkspace(value: any): asserts value is WorkspaceSnapsho
   for (const task of value.data.tasks) {
     if (!task || typeof task.id !== 'string' || ids.has(task.id) || typeof task.title !== 'string' ||
         !['open', 'done'].includes(task.status)) throw new Error('任务数据校验失败');
+    if(task.reminder != null)validateReminder(task.reminder);
     ids.add(task.id);
   }
   const byId = new Map<string, TaskNode>(value.data.tasks.map((t: TaskNode) => [t.id, t]));
@@ -202,6 +204,7 @@ async function send(op: NonNullable<typeof failedOperation>, checkpoint = false)
   if (isAndroid()) {
     const ack = await NativeWorkspace.commit({ ...op, data: undefined, changes: workspaceDelta(snapshot!.data, op.data), settings: op.data.settings, ai_settings: op.data.ai_settings, checkpoint } as any);
     next = { schema_version: 2, ...ack, data: op.data };
+    if(ack.reminder_error)window.dispatchEvent(new CustomEvent("todotree:reminder-error",{detail:ack.reminder_error}));
   } else if (isDesktop()) next = await request('/api/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(op) });
   else {
     next = { schema_version: 2, revision: op.expected_revision + 1, operation_id: op.operation_id, saved_at: new Date().toISOString(), data: op.data };
@@ -255,10 +258,11 @@ export async function exportFullBackup(): Promise<string> {
   validateWorkspace(state);
   return encodeWorkspaceBackup(state);
 }
-export async function importFullBackup(value: unknown): Promise<WorkspaceSnapshot> {
+export async function importFullBackup(value: unknown, options: {enableReminders?:boolean} = {}): Promise<WorkspaceSnapshot> {
   validateWorkspace(value);
   await verifyWorkspaceBackup(value);
   const data = clone(value.data);
+  if(!options.enableReminders)data.tasks=pauseImportedReminders(data.tasks);
   return commitWorkspace(previous => {
     const ai_settings = { ...data.ai_settings };
     delete ai_settings.api_key;

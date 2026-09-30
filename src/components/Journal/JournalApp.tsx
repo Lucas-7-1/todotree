@@ -28,6 +28,7 @@ import {
   NotebookPen,
 } from "lucide-react";
 import { journal } from "../../services/journal/store";
+import { registerNavigationGuard } from "../../services/navigationGuard";
 import {
   JournalBook,
   JournalCursor,
@@ -51,9 +52,11 @@ export default function JournalApp({
   onClose,
   create = false,
   onModeChange,
+  initialDraftId,
 }: {
   onClose: () => void;
   create?: boolean;
+  initialDraftId?:string;
   onModeChange?: (mode:AppMode)=>void;
 }) {
   const savedView = useRef(readJournalView()).current;
@@ -128,11 +131,17 @@ export default function JournalApp({
   const refresh = () => setRevision((n) => n + 1);
   const changed = (message:string, undoId?:string) => {setNotice(message);setUndo(undoId||null);refresh();};
   useEffect(()=>{ try {localStorage.setItem('todotree.journal.view.v1',JSON.stringify({selected,month,week,mode,book}));} catch {} },[selected,month,week,mode,book]);
-  const changeMode = async (mode:AppMode) => {if(busyRef.current || (treeGuard.current && !(await treeGuard.current())))return;onModeChange?.(mode);};
+  useEffect(() => registerNavigationGuard(async () => {
+    if (busyRef.current) return false;
+    return treeGuard.current ? treeGuard.current() : true;
+  }), []);
+  const changeMode = (mode:AppMode) => {if(!busyRef.current)onModeChange?.(mode);};
   const leave = async () => { if(busyRef.current || (treeGuard.current && !(await treeGuard.current())))return; onClose(); };
   const openDetail = async (entry:JournalEntry) => { if(treeGuard.current && !(await treeGuard.current()))return;setDetail(await journal.get(entry.id)); };
   useEffect(()=>{ if(!detail)return;let live=true;journal.get(detail.id).then(e=>live&&setDetail(e)).catch(()=>{if(live)setDetail(null);});return()=>{live=false;}; },[revision]);
 
+  const sharedDraftOpened=useRef<string|null>(null);
+  useEffect(()=>{if(!initialDraftId||sharedDraftOpened.current===initialDraftId)return;const d=drafts.find(x=>x.id===initialDraftId);if(d){sharedDraftOpened.current=initialDraftId;if(!editing)setEditing(d);else setDraftList(true);}},[initialDraftId,drafts]);
   const boot = useCallback(async () => {
     const data = await journal.boot();
     setBooks(data.books);
@@ -823,6 +832,7 @@ export default function JournalApp({
             <small>
               {detail.event_time || "未标时间"}
               {detail.location_text ? ` · ${detail.location_text}` : ""}
+              {detail.place?.address ? ` · ${detail.place.address}` : ""}
             </small>
             {detail.description && (
               <p className="j-prose">{detail.description}</p>
