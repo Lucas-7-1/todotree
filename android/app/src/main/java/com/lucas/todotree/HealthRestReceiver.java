@@ -29,7 +29,7 @@ public class HealthRestReceiver extends BroadcastReceiver {
         String key = "rest:" + id + ":" + version;
         if (!delivery.claim(key, id, "rest")) return;
         NotificationManager manager = context.getSystemService(NotificationManager.class);
-        manager.createNotificationChannel(new NotificationChannel("workout-rest", "训练休息提醒", NotificationManager.IMPORTANCE_DEFAULT));
+        if(Build.VERSION.SDK_INT>=26)manager.createNotificationChannel(new NotificationChannel("workout-rest", "训练休息提醒", NotificationManager.IMPORTANCE_DEFAULT));
         Intent open = new Intent(context, MainActivity.class).putExtra("health_session", id)
           .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent launch = PendingIntent.getActivity(context, id.hashCode(), open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);

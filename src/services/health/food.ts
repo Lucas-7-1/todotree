@@ -75,7 +75,8 @@ export function searchLocalFoods(query:string):FoodSnapshot[] {
   const hint=aliases[text]||text;
   const tokens=(hint+' '+preparation).toLowerCase().match(/[a-z0-9]+/g)||[];
   if(!tokens.length)return [];
-  return (legacyFoods as [number,string,number|null][]).filter(row=>{const words=new Set(row[1].toLowerCase().match(/[a-z0-9]+/g)||[]);return tokens.every(t=>words.has(t)||words.has(t+'s'));}).sort((a,b)=>((a[1].toLowerCase().startsWith(tokens[0])?0:1000)+a[1].length)-((b[1].toLowerCase().startsWith(tokens[0])?0:1000)+b[1].length)).slice(0,30).map(row=>({id:'fdc-'+row[0],name:row[1],state:row[1],provider:'usda',source:'USDA SR Legacy（离线）',source_id:String(row[0]),source_url:'https://fdc.nal.usda.gov/food-details/'+row[0]+'/nutrients',kcal_per_100g:row[2],captured_at:new Date().toISOString(),data_type:'SR Legacy · 核对生熟/做法',source_version:'2018-04',license_url:'https://fdc.nal.usda.gov/data-documentation.html'}));
+  const first=tokens[0]||'';
+  return (legacyFoods as [number,string,number|null][]).filter(row=>{const words=new Set(row[1].toLowerCase().match(/[a-z0-9]+/g)||[]);return tokens.every(t=>words.has(t)||words.has(t+'s'));}).sort((a,b)=>((a[1].toLowerCase().startsWith(first)?0:1000)+a[1].length)-((b[1].toLowerCase().startsWith(first)?0:1000)+b[1].length)).slice(0,30).map(row=>({id:'fdc-'+row[0],name:row[1],state:row[1],provider:'usda',source:'USDA SR Legacy（离线）',source_id:String(row[0]),source_url:'https://fdc.nal.usda.gov/food-details/'+row[0]+'/nutrients',kcal_per_100g:row[2],captured_at:new Date().toISOString(),data_type:'SR Legacy · 核对生熟/做法',source_version:'2018-04',license_url:'https://fdc.nal.usda.gov/data-documentation.html'}));
 }
 
 const recentSearches = new Map<string,{until:number;foods:FoodSnapshot[]}>();

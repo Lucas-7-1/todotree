@@ -67,7 +67,7 @@ const fs = require("node:fs/promises");
       .getByRole("button", { name: "饮食 记一餐", exact: true })
       .click();
     await page.getByLabel("食物名称", { exact: true }).fill("自制炒饭");
-    await page.getByLabel("食物克重", { exact: true }).fill("150");
+    await page.getByLabel("摄入实际份量", { exact: true }).fill("150");
     await page.getByRole("button", { name: "保存", exact: true }).click();
     await page.locator(".h-editor").waitFor({ state: "hidden" });
     assert.equal(

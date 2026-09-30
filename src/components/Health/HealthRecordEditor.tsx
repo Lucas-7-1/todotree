@@ -547,7 +547,7 @@ export function HealthRecordEditor(p: {
                   </button>
                 ))}
               </div>
-              <div className="food-source-select"><label>查询来源<select aria-label="食品查询来源" value={provider} onChange={e=>{changeQuery(query);setProvider(e.target.value as FoodProvider);}}><option value="local">常见食材 · USDA 离线参考</option><option value="usda">更多食材 · USDA 在线</option><option value="off">包装条码 · Open Food Facts</option><option value="personal">我的营养标签</option></select></label><button onClick={()=>setConnections(true)}>来源设置</button></div>
+              <small className="h-muted">食品来源 · 测试版</small><div className="food-source-select"><label>查询来源<select aria-label="食品查询来源" value={provider} onChange={e=>{changeQuery(query);setProvider(e.target.value as FoodProvider);}}><option value="local">常见食材 · USDA 离线参考</option><option value="usda">更多食材 · USDA 在线</option><option value="off">包装条码 · Open Food Facts</option><option value="personal">我的营养标签</option></select></label><button onClick={()=>setConnections(true)}>来源设置</button></div>
               <div className="h-food-search">
                 <input
                   aria-label="食物名称"
@@ -620,7 +620,7 @@ export function HealthRecordEditor(p: {
                     营养标签能量（选填）
                     <div className="h-fields"><select aria-label="营养标签基准" value={labelBasis} onChange={e=>setLabelBasis(e.target.value as typeof labelBasis)}><option value="100g">每 100g</option><option value="100ml">每 100ml</option><option value="serving">每份</option></select><select aria-label="能量单位" value={energyUnit} onChange={e=>setEnergyUnit(e.target.value as typeof energyUnit)}><option value="kcal">kcal</option><option value="kJ">kJ</option></select></div>
                     <input
-                      aria-label="每100克热量"
+                      aria-label="营养标签能量"
                       type="number"
                       min="0"
                       inputMode="decimal"
@@ -640,7 +640,7 @@ export function HealthRecordEditor(p: {
                 实际可食份量
                 <select aria-label="摄入份量单位" value={quantityUnit} onChange={e=>setQuantityUnit(e.target.value as FoodQuantity['unit'])}><option value="g">克 g</option><option value="ml">毫升 ml</option><option value="serving">份</option></select>
                 <input
-                  aria-label="食物克重"
+                  aria-label="摄入实际份量"
                   type="number"
                   inputMode="decimal"
                   min="0"

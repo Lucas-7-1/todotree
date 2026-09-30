@@ -50,8 +50,8 @@ public class HealthRestService extends Service {
   private void deliverDiagnostic(JSONObject entry){
     try(IntegrationStore store=new IntegrationStore(this)){
       JSONObject state=store.claimDiagnostic(entry.optString("id"));if(state==null)return;
-      NotificationManager manager=getSystemService(NotificationManager.class);manager.createNotificationChannel(new NotificationChannel("workout-rest","训练休息提醒",NotificationManager.IMPORTANCE_DEFAULT));
-      if(!NotificationManagerCompat.from(this).areNotificationsEnabled()||manager.getNotificationChannel("workout-rest").getImportance()==NotificationManager.IMPORTANCE_NONE){state.put("state","blocked");store.saveDiagnostic(state);return;}
+      NotificationManager manager=getSystemService(NotificationManager.class);if(Build.VERSION.SDK_INT>=26)manager.createNotificationChannel(new NotificationChannel("workout-rest","训练休息提醒",NotificationManager.IMPORTANCE_DEFAULT));
+      if(!NotificationManagerCompat.from(this).areNotificationsEnabled()||(Build.VERSION.SDK_INT>=26&&manager.getNotificationChannel("workout-rest").getImportance()==NotificationManager.IMPORTANCE_NONE)){state.put("state","blocked");store.saveDiagnostic(state);return;}
       PendingIntent open=PendingIntent.getActivity(this,7303,new Intent(this,MainActivity.class),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
       manager.notify("rest-test",7303,new NotificationCompat.Builder(this,"workout-rest").setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle("锁屏休息计时测试结束").setContentText("请打开连接设置，确认是否听到或看到提醒").setContentIntent(open).setAutoCancel(true).build());
       state.put("state","posted").put("fired_at",System.currentTimeMillis());store.saveDiagnostic(state);
@@ -60,7 +60,7 @@ public class HealthRestService extends Service {
   static boolean running() { return live != null; }
   @Override public void onCreate() {
     super.onCreate(); live = this;
-    getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel(CHANNEL, "训练休息倒计时", NotificationManager.IMPORTANCE_LOW));
+    if(Build.VERSION.SDK_INT>=26)getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel(CHANNEL, "训练休息倒计时", NotificationManager.IMPORTANCE_LOW));
     wake = ((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, getPackageName() + ":rest");
     wake.setReferenceCounted(false);
   }
